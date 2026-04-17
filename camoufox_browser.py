@@ -197,29 +197,39 @@ def main():
                 camoufox_kwargs["firefox_user_prefs"]["browser.startup.page"] = 1
                 camoufox_kwargs["firefox_user_prefs"]["toolkit.legacyUserProfileCustomizations.stylesheets"] = True
                 
-                # 删除持久化文件目录里记录上一次窗口配置的 xulstore.json
+                # 强制覆盖 xulstore.json 中记录的旧窗口配置
                 xulstore_path = user_data_dir / "xulstore.json"
                 if xulstore_path.exists():
                     try:
-                        xulstore_path.unlink()
+                        xul_data = json.loads(xulstore_path.read_text(encoding="utf-8"))
+                        if "chrome://browser/content/browser.xhtml" in xul_data:
+                            if "main-window" in xul_data["chrome://browser/content/browser.xhtml"]:
+                                xul_data["chrome://browser/content/browser.xhtml"]["main-window"]["width"] = str(width)
+                                xul_data["chrome://browser/content/browser.xhtml"]["main-window"]["height"] = str(height)
+                                # 也可以移除位置记忆让它居中，不过重点是宽和高
+                                xulstore_path.write_text(json.dumps(xul_data), encoding="utf-8")
                     except Exception:
-                        pass
+                        try:
+                            xulstore_path.unlink()
+                        except Exception:
+                            pass
             
             # 通过 Playwright viewport 属性传递初始大小
             camoufox_kwargs["viewport"] = {"width": width, "height": height}
             # Firefox 的 -width 和 -height 已经被弃用了或者在这个版本里不兼容，因此不再通过 command line args 传递
             
-            # 如果是恢复配置并且想要新的窗口尺寸，由于 camoufox 会吃掉 config 里的记录的尺寸
-            # 我们需要在 config 里强行覆盖指纹相关字段，否则 camoufox 依然会用 config 里缓存的 1920x1080 去覆盖一切
-            if args.restore_profile and "config" in camoufox_kwargs:
-                camoufox_kwargs["config"]["screen:width"] = width
-                camoufox_kwargs["config"]["screen:height"] = height
-                camoufox_kwargs["config"]["screen:availWidth"] = width
-                camoufox_kwargs["config"]["screen:availHeight"] = height
-                camoufox_kwargs["config"]["screen:innerWidth"] = width
-                camoufox_kwargs["config"]["screen:innerHeight"] = height - 100
-                camoufox_kwargs["config"]["screen:outerWidth"] = width
-                camoufox_kwargs["config"]["screen:outerHeight"] = height
+            # 由于在恢复旧指纹时，原指纹中的分辨率可能是别的值
+            # 为了防止被旧指纹带偏导致窗体过大或过小，我们直接通过 config 注入强制覆盖屏幕参数
+            if "config" not in camoufox_kwargs:
+                camoufox_kwargs["config"] = {}
+            camoufox_kwargs["config"]["screen.width"] = width
+            camoufox_kwargs["config"]["screen.height"] = height
+            camoufox_kwargs["config"]["screen.availWidth"] = width
+            camoufox_kwargs["config"]["screen.availHeight"] = height
+            camoufox_kwargs["config"]["window.innerWidth"] = width
+            camoufox_kwargs["config"]["window.innerHeight"] = height - 100
+            camoufox_kwargs["config"]["window.outerWidth"] = width
+            camoufox_kwargs["config"]["window.outerHeight"] = height
         except Exception:
             pass
 
