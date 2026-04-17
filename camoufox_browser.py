@@ -144,8 +144,8 @@ def main():
             try:
                 width, height = map(int, args.window.lower().split("x"))
                 from browserforge.fingerprints import Screen
-                # 将分辨率约束在生成器级别
-                gen = FingerprintGenerator(browser="firefox", screen=Screen(min_width=width, max_width=width, min_height=height, max_height=height))
+                # 将分辨率约束在生成器级别（适当放宽限制，防止因为特定分辨率导致无匹配 header 生成报错）
+                gen = FingerprintGenerator(browser="firefox", screen=Screen(min_width=width, max_width=width+500, min_height=height, max_height=height+500))
             except Exception as e:
                 print(f"[-] 分辨率格式错误: {e}")
                 gen = FingerprintGenerator(browser="firefox")
@@ -207,13 +207,7 @@ def main():
             
             # 通过 Playwright viewport 属性传递初始大小
             camoufox_kwargs["viewport"] = {"width": width, "height": height}
-            # 特别是对于 Firefox，需要这个来防止持久化上下文中记录的大小覆盖
-            if "args" not in camoufox_kwargs:
-                camoufox_kwargs["args"] = []
-            camoufox_kwargs["args"].extend([
-                f"-width={width}", 
-                f"-height={height}"
-            ])
+            # Firefox 的 -width 和 -height 已经被弃用了或者在这个版本里不兼容，因此不再通过 command line args 传递
             
             # 如果是恢复配置并且想要新的窗口尺寸，由于 camoufox 会吃掉 config 里的记录的尺寸
             # 我们需要在 config 里强行覆盖指纹相关字段，否则 camoufox 依然会用 config 里缓存的 1920x1080 去覆盖一切
