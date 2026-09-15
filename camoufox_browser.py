@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import urllib.parse
 from pathlib import Path
 
@@ -9,6 +10,37 @@ try:
 except ImportError:
     print("[-] 缺少依赖库。请先执行：pip install 'camoufox[geoip]' browserforge")
     exit(1)
+
+LOCAL_NO_PROXY = (
+    "localhost",
+    "127.0.0.1",
+    "127.0.0.0/8",
+    "::1",
+    "0.0.0.0",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    ".local",
+)
+
+
+def merge_no_proxy(existing: str, additions: tuple[str, ...]) -> str:
+    entries = [entry.strip() for entry in existing.split(",") if entry.strip()]
+    seen = {entry.lower() for entry in entries}
+    for entry in additions:
+        if entry.lower() not in seen:
+            entries.append(entry)
+            seen.add(entry.lower())
+    return ",".join(entries)
+
+
+def ensure_local_no_proxy() -> str:
+    existing = os.environ.get("NO_PROXY") or os.environ.get("no_proxy", "")
+    merged = merge_no_proxy(existing, LOCAL_NO_PROXY)
+    os.environ["NO_PROXY"] = merged
+    os.environ["no_proxy"] = merged
+    return merged
+
 
 def parse_proxy(proxy_str: str) -> dict:
     """
@@ -27,6 +59,12 @@ def parse_proxy(proxy_str: str) -> dict:
         proxy_dict["password"] = urllib.parse.unquote(parsed.password)
         
     return proxy_dict
+
+
+def build_proxy_config(proxy_str: str) -> tuple[dict, str]:
+    proxy_config = parse_proxy(proxy_str)
+    no_proxy = ensure_local_no_proxy()
+    return proxy_config, no_proxy
 
 def dict_to_dataclass(cls, data):
     """
@@ -121,8 +159,9 @@ def main():
     # 3. 代理配置
     proxy_config = None
     if args.proxy:
-        proxy_config = parse_proxy(args.proxy)
+        proxy_config, no_proxy = build_proxy_config(args.proxy)
         print(f"[*] 已配置代理: {proxy_config['server']}")
+        print(f"[*] 本地/内网地址将绕过代理: {no_proxy}")
 
     print("[*] 正在启动防指纹浏览器...")
     
