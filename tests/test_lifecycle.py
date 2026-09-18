@@ -74,3 +74,19 @@ def test_failed_state_is_preserved_without_treating_it_as_running(catalog):
     )
     assert session_status(account) == {"state": "failed", "pid": None, "error": "safe message"}
     assert not stop_account(account)
+
+
+def test_no_urls_is_passed_to_the_worker_without_touching_config(catalog, monkeypatch):
+    """--no-urls is per-run: the worker is told to skip, the catalog is unchanged."""
+    account = catalog.accounts[0]
+    # poll() returning an exit code makes start_account give up immediately.
+    spawn = Mock(return_value=Mock(poll=Mock(return_value=1)))
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+
+    for no_urls, expected in ((False, False), (True, True)):
+        spawn.reset_mock()
+        with pytest.raises(WorkspaceError, match="进程启动失败"):
+            start_account(catalog, account, no_urls=no_urls)
+        assert ("--no-urls" in spawn.call_args.args[0]) is expected
+
+    assert catalog.accounts[0].urls == account.urls

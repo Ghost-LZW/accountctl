@@ -26,6 +26,7 @@ accountctl stop google-personal
 ```bash
 accountctl start --tag google  # 启动标签匹配的账号
 accountctl start account-a account-b
+accountctl start account-a --no-urls  # 本次只开空白页，不打开配置的网址
 accountctl status --all
 accountctl stop --all
 accountctl validate
@@ -34,6 +35,17 @@ accountctl --config /absolute/path/accounts.toml list
 ```
 
 标签可重复，多个标签取交集；批量启动部分失败会返回非零状态，其他已成功启动的账号保持运行。`--headless` 用于测试，不是自动登录模式。
+
+`--no-urls` 只影响本次启动，不修改 `accounts.toml`；想长期不打开网址，把账号的 `urls` 删掉即可继承 `[defaults]`（默认 `about:blank`）。`urls` 不参与指纹校验，改动它不需要重建环境。
+
+`add` 也可直接指定窗口、GeoIP 与代理来源，不必手工编辑 TOML：
+
+```bash
+accountctl add claude03 --label "Claude · 03" --provider claude --tag claude \
+  --url https://claude.ai/ --window 1280x800 --geoip --proxy-from-account claude02
+```
+
+`--geoip` 与 `--locale/--timezone` 互斥；`--proxy`、`--proxy-ref`、`--proxy-from-account` 三选一。
 
 ## 从 1Password 批量配置
 
@@ -141,7 +153,7 @@ accounts.toml                    # 本机账号配置（Git 忽略）
 
 新配置的代理只支持无认证 URL 或 `op://` / `env://` 引用；旧兼容模式额外允许直接引用原 `meta.json`。旧文件中的明文密码仍需你自行迁移到 1Password，本工具不擅自覆盖。本地 Playwright 控制连接会合并 `NO_PROXY`；这不等于所有浏览器内网访问都会自动绕过上游代理。Chrome/Chromium、远程调试端口、跨账号共享 cookie、批量自动登录均不在范围内。
 
-多个账号复用同一代理时，可设置 `proxy_from_account = "claude02"`。
+多个账号复用同一代理时，可设置 `proxy_from_account = "claude02"`（等价的命令行参数是 `accountctl add --proxy-from-account claude02`，`adopt-profile` 同名参数用于旧 `meta.json` 没有代理的情况）。
 这只复用代理来源，不共享指纹、Cookies 或窗口设置，也不复制代理密码。
 被引用的账号必须保留在配置中；循环引用、未知账号或未配置代理都会被拒绝。
 

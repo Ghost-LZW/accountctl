@@ -66,6 +66,11 @@ def parser() -> argparse.ArgumentParser:
         sub.add_argument("--all", action="store_true")
         if action == "start":
             sub.add_argument("--headless", action="store_true", help="测试用；仍需 stop 关闭")
+            sub.add_argument(
+                "--no-urls",
+                action="store_true",
+                help="本次只开空白页，不打开账号配置的网址；不修改配置",
+            )
     importing = commands.add_parser("import-1password", help="批量导入 Login 条目引用")
     importing.add_argument("--vault", help="建议限定保险库")
     importing.add_argument("--tag", help="1Password 条目标签")
@@ -201,7 +206,9 @@ def execute(args) -> int:
         for account in accounts:
             try:
                 if args.command == "start":
-                    status = start_account(catalog, account, headless=args.headless)
+                    status = start_account(
+                        catalog, account, headless=args.headless, no_urls=args.no_urls
+                    )
                     print(f"{account.id}: running · 指纹 {status['fingerprint_id'][:16]}")
                 elif args.command == "stop":
                     requested = stop_account(account)

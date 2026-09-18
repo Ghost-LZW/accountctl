@@ -43,3 +43,7 @@ _Avoid_: 最新版浏览器、随 fetch 漂移
 **只允许存在一个 camoufox。** 浏览器安装目录（`~/Library/Caches/camoufox`）由 `platformdirs` 决定，**所有** camoufox 安装共享同一个路径，无论装在哪个解释器下。camoufox 0.5.x 在 `camoufox_path()` 开头会无条件 `rmtree` 该目录（仅凭 `.0.5_FLAG` 是否存在判断），发生在检查参数之前，因此 `fingerprint.installed_executable()` 里的 `download_if_missing=False` 拦不住它。一旦被触发，钉定的浏览器构建被删除、重新下载成新版本，所有账号环境因运行时不符而拒绝启动。
 
 2026-09-17 已因此卸载 anaconda 下手动安装的 `cloverlabs-camoufox` 0.5.5（一个 fork，import 名同为 `camoufox`，故 `version("camoufox")` 查不到它）。当时 anaconda 在 `PATH` 上优先于本项目 venv，未激活 venv 时裸敲 `python` 或 `camoufox` 命中的都是它。**不要在本机其他解释器上再安装任何 camoufox 发行版**；只用 `venv/bin/python`。
+
+**跨 OS 伪装的账号需要宿主机装有对应字体。** camoufox 按伪装的 OS 过滤可用字体：`claude-mi` 声称 Windows，于是只放行微软雅黑 / SimSun 等 Windows 字体名。camoufox 虽自带 `msyh.ttc`，但只按名字放行、不真正加载它，宿主机没装就渲染成 .notdef 方块（中文全变空心方框）。这是 camoufox 的固有行为，原生启动路径同样如此，`gfx.bundled-fonts.activate` 无效。
+
+2026-09-17 处理方式：从 camoufox 自带字体目录复制 `msyh*.ttc` 到 `~/Library/Fonts/`。选它而非改指纹，是因为改伪装 OS 会导致该账号需重建环境、重新登录。安装字体不影响固化指纹，无需重登。

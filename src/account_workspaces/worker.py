@@ -15,7 +15,9 @@ from .network import account_proxy
 from .storage import lock, write_json
 
 
-def run_session(account: Account, token: str, *, headless: bool, once: bool = False) -> None:
+def run_session(
+    account: Account, token: str, *, headless: bool, once: bool = False, no_urls: bool = False
+) -> None:
     from playwright.sync_api import Error, sync_playwright
 
     closing = False
@@ -45,7 +47,9 @@ def run_session(account: Account, token: str, *, headless: bool, once: bool = Fa
                 },
             )
             pages = context.pages
-            for index, url in enumerate(account.urls):
+            # Keep one page so the legacy window sizing below still applies.
+            urls = ("about:blank",) if no_urls else account.urls
+            for index, url in enumerate(urls):
                 if closing or stop_requested(account, token):
                     break
                 page = pages[0] if index == 0 and pages else context.new_page()
@@ -80,6 +84,7 @@ def main() -> int:
     parser.add_argument("--account", required=True)
     parser.add_argument("--token", required=True)
     parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--no-urls", action="store_true")
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
     catalog = load_catalog(args.config)
@@ -95,7 +100,13 @@ def main() -> int:
                 },
             )
             try:
-                run_session(account, args.token, headless=args.headless, once=args.once)
+                run_session(
+                    account,
+                    args.token,
+                    headless=args.headless,
+                    once=args.once,
+                    no_urls=args.no_urls,
+                )
             except Exception as error:
                 message = (
                     str(error)

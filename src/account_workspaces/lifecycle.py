@@ -30,7 +30,9 @@ def session_status(account: Account) -> dict:
     }
 
 
-def start_account(catalog: Catalog, account: Account, *, headless: bool = False) -> dict:
+def start_account(
+    catalog: Catalog, account: Account, *, headless: bool = False, no_urls: bool = False
+) -> dict:
     if is_locked(profile_lock(account)):
         raise WorkspaceError(f"{account.id} 已经运行或正在启动")
     token = uuid.uuid4().hex
@@ -47,6 +49,8 @@ def start_account(catalog: Catalog, account: Account, *, headless: bool = False)
     ]
     if headless:
         command.append("--headless")
+    if no_urls:
+        command.append("--no-urls")
     # Do not capture library output in logs: third-party exceptions can include secrets.
     child = subprocess.Popen(
         command,
