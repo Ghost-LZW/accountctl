@@ -47,6 +47,11 @@ def parser() -> argparse.ArgumentParser:
     add.add_argument("--op-account")
     add.add_argument("--proxy")
     add.add_argument("--proxy-ref")
+    add.add_argument("--proxy-from-account", help="复用另一账号的代理来源，不复制密码")
+    add.add_argument("--window", help="例如 1280x800")
+    add.add_argument("--geoip", action="store_true", help="首次启动按代理出口 IP 固化地理参数")
+    add.add_argument("--locale", help="与 --geoip 互斥")
+    add.add_argument("--timezone", help="与 --geoip 互斥")
     for action in ("start", "stop", "status"):
         sub = commands.add_parser(
             action,
@@ -73,6 +78,7 @@ def parser() -> argparse.ArgumentParser:
     migration.add_argument("directory", type=Path)
     migration.add_argument("--url", action="append", default=["about:blank"])
     migration.add_argument("--proxy-ref", help="替代旧 meta.json 中的带密码代理")
+    migration.add_argument("--proxy-from-account", help="旧 meta.json 没有代理时，复用另一账号的")
     migration.add_argument("--locale")
     migration.add_argument("--timezone")
     return result
@@ -111,6 +117,14 @@ def doctor(catalog) -> int:
     return 1 if failures else 0
 
 
+def _window(value: str) -> list[int]:
+    try:
+        width, height = (int(n) for n in value.lower().split("x"))
+    except (ValueError, AttributeError):
+        raise WorkspaceError("窗口格式必须是 宽x高，例如 1280x800") from None
+    return [width, height]
+
+
 def execute(args) -> int:
     path = (args.config or default_config()).expanduser().resolve()
     if args.command == "init":
@@ -137,8 +151,14 @@ def execute(args) -> int:
             if getattr(args, name)
         }
         browser = {
-            name: getattr(args, name) for name in ("proxy", "proxy_ref") if getattr(args, name)
+            name: getattr(args, name)
+            for name in ("proxy", "proxy_ref", "proxy_from_account", "locale", "timezone")
+            if getattr(args, name)
         }
+        if args.geoip:
+            browser["geoip"] = True
+        if args.window:
+            browser["window"] = _window(args.window)
         if credentials:
             row["credentials"] = credentials
         if browser:
@@ -228,12 +248,11 @@ def execute(args) -> int:
         if args.timezone:
             browser["timezone"] = args.timezone
         if meta.get("window"):
-            try:
-                browser["window"] = [int(n) for n in meta["window"].lower().split("x")]
-            except (ValueError, AttributeError):
-                raise WorkspaceError("旧窗口格式无效") from None
+            browser["window"] = _window(meta["window"])
         if args.proxy_ref:
             browser["proxy_ref"] = args.proxy_ref
+        elif args.proxy_from_account:
+            browser["proxy_from_account"] = args.proxy_from_account
         elif meta.get("proxy"):
             browser["proxy_from_meta"] = True
         add_accounts(
@@ -249,7 +268,7 @@ def execute(args) -> int:
         )
         print("已登记旧目录；fingerprint.json 和 user_data 未修改。")
         print("旧脚本没有保存 Canvas/WebGL 等最终参数；首次启动将固定它们，不能还原历史值。")
-        if meta.get("proxy"):
+        if browser.get("proxy_from_meta"):
             print("继续使用旧 meta.json 中的代理，未将代理密码复制到新配置。")
         if meta.get("geoip"):
             print("保留 GeoIP：首次通过原代理解析地理位置/时区/语言后固化，之后不重新采样。")
