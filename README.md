@@ -10,6 +10,7 @@
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
+python scripts/patch_camoufox.py
 python -m camoufox fetch
 accountctl init
 accountctl add google-personal --provider google --tag google \
@@ -89,6 +90,10 @@ proxy_ref = "env://SERVICE_PROXY"
 3. 绑定账号 ID，拒绝将已有 profile 复制给另一账号。不同账号的随机参数独立生成，`doctor` 检查重复指纹。
 4. 固定窗口、语言和时区。`geoip = true` 时首次通过账号代理解析地理位置/时区/语言并固化；后续不重新采样。更改这些配置会拒绝启动，不会悄悄重建。
 5. 记录 Camoufox、BrowserForge、Playwright 版本及浏览器二进制 SHA-256。运行时变更会拒绝启动；不要盲目更新依赖或重新 fetch。
+
+浏览器版本由 `scripts/patch_camoufox.py` 钉在 `135.0.1-beta.24`。上游已发布更新的版本，而 Camoufox 默认会自动取"第一个受支持的"版本，一旦升级就与上面第 5 点固化的运行时不符，所有账号环境都会拒绝启动（`CamoufoxFetcher.install()` 还会先删掉原有安装再下载）。同一个脚本还把 GeoIP 数据库改为走 GitHub 的 `latest/download` 直链：`GeoLite2-City.mmdb` 存在 `site-packages` 而不随 wheel 发布，重建 venv 会连带删掉，而原本的下载路径走限流的 GitHub API（共享出口 IP 常被耗尽）。
+
+两处补丁都改在 `venv/` 内、而 `venv/` 不入库，因此**每次重建虚拟环境或 `pip install` 之后都要重新执行一次**；`pytest` 会检查补丁是否在位，`--check` 可单独校验。
 
 这是对管理范围内指纹配置的稳定性保证，**不保证网站看到的所有特征永久不变或绕过风控**：出口 IP、硬件、系统字体、浏览器安全升级、网站采集算法等仍可能影响结果。换设备前先备份并验证。不同账号可有相同分辨率或 UA，但完整配置及随机种子不同。
 
