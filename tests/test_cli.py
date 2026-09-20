@@ -58,3 +58,86 @@ def test_password_proxy_never_echoed(catalog, capsys):
         == 1
     )
     assert "secret" not in capsys.readouterr().err
+
+
+def test_add_browser_options(catalog):
+    assert (
+        main(
+            [
+                "--config",
+                str(catalog.path),
+                "add",
+                "proxy-source",
+                "--proxy",
+                "http://localhost:7897",
+            ]
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "--config",
+                str(catalog.path),
+                "add",
+                "claude03",
+                "--url",
+                "https://claude.ai/",
+                "--window",
+                "1280x800",
+                "--geoip",
+                "--proxy-from-account",
+                "proxy-source",
+            ]
+        )
+        == 0
+    )
+    added = load_catalog(catalog.path).accounts[-1]
+    assert added.browser.window == (1280, 800)
+    assert added.browser.geoip
+    assert added.urls == ("https://claude.ai/",)
+    # The reference resolves to the source's proxy without copying it into the row.
+    assert added.browser.proxy == "http://localhost:7897"
+    assert "proxy-source" in catalog.path.read_text()
+
+
+def test_add_rejects_conflicting_proxy_sources(catalog):
+    assert (
+        main(
+            [
+                "--config",
+                str(catalog.path),
+                "add",
+                "claude06",
+                "--proxy",
+                "http://localhost:7897",
+                "--proxy-from-account",
+                "alpha",
+            ]
+        )
+        == 1
+    )
+    assert len(load_catalog(catalog.path).accounts) == 2
+
+
+def test_add_rejects_geoip_with_timezone(catalog, capsys):
+    assert (
+        main(
+            [
+                "--config",
+                str(catalog.path),
+                "add",
+                "claude04",
+                "--geoip",
+                "--timezone",
+                "Asia/Shanghai",
+            ]
+        )
+        == 1
+    )
+    assert len(load_catalog(catalog.path).accounts) == 2
+
+
+def test_add_rejects_bad_window(catalog):
+    assert main(["--config", str(catalog.path), "add", "claude05", "--window", "huge"]) == 1
+    assert len(load_catalog(catalog.path).accounts) == 2

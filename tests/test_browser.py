@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+from account_workspaces.config import load_catalog
 from account_workspaces.fingerprint import browser_options, prepare_fingerprint
 from account_workspaces.lifecycle import session_status, start_account, stop_account
 from account_workspaces.storage import lock
@@ -108,3 +109,58 @@ def test_real_background_start_and_graceful_stop(catalog):
         while time.monotonic() < deadline and session_status(other)["state"] != "stopped":
             time.sleep(0.1)
         assert session_status(other)["state"] == "stopped"
+
+
+def test_real_no_urls_skips_the_configured_site(catalog):
+    """Evidence that --no-urls actually prevents navigation, not just passes a flag."""
+    requested = []
+
+    class Page(BaseHTTPRequestHandler):
+        def do_GET(self):
+            requested.append(self.path)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"<html><title>should not load</title></html>")
+
+        def log_message(self, *_):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Page)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_port}/"
+
+    # The worker re-reads the catalog from disk, so the URL must land in the TOML.
+    # Anchor on the account's id: the first `urls =` line belongs to [defaults].
+    text = catalog.path.read_text(encoding="utf-8")
+    marker = f'id = "{catalog.accounts[0].id}"'
+    head, _, tail = text.partition(marker)
+    catalog.path.write_text(
+        head + marker + tail.replace('urls = ["about:blank"]', f'urls = ["{url}"]', 1)
+    )
+    reloaded = load_catalog(catalog.path)
+    account = reloaded.accounts[0]
+    assert account.urls == (url,), "test setup failed to install the local URL"
+
+    def wait_until_stopped():
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and session_status(account)["state"] != "stopped":
+            time.sleep(0.1)
+
+    try:
+        start_account(reloaded, account, headless=True, no_urls=True)
+        time.sleep(3)
+        assert requested == [], f"navigated despite --no-urls: {requested}"
+        stop_account(account)
+        wait_until_stopped()
+
+        # Control: without the flag the same account does reach the site.
+        start_account(reloaded, account, headless=True)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and not requested:
+            time.sleep(0.1)
+        assert requested, "control run never navigated; the test proves nothing"
+    finally:
+        stop_account(account)
+        wait_until_stopped()
+        server.shutdown()
+        server.server_close()

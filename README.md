@@ -10,6 +10,7 @@
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
+python scripts/patch_camoufox.py
 python -m camoufox fetch
 accountctl init
 accountctl add google-personal --provider google --tag google \
@@ -25,6 +26,7 @@ accountctl stop google-personal
 ```bash
 accountctl start --tag google  # 启动标签匹配的账号
 accountctl start account-a account-b
+accountctl start account-a --no-urls  # 本次只开空白页，不打开配置的网址
 accountctl status --all
 accountctl stop --all
 accountctl validate
@@ -33,6 +35,17 @@ accountctl --config /absolute/path/accounts.toml list
 ```
 
 标签可重复，多个标签取交集；批量启动部分失败会返回非零状态，其他已成功启动的账号保持运行。`--headless` 用于测试，不是自动登录模式。
+
+`--no-urls` 只影响本次启动，不修改 `accounts.toml`；想长期不打开网址，把账号的 `urls` 删掉即可继承 `[defaults]`（默认 `about:blank`）。`urls` 不参与指纹校验，改动它不需要重建环境。
+
+`add` 也可直接指定窗口、GeoIP 与代理来源，不必手工编辑 TOML：
+
+```bash
+accountctl add claude03 --label "Claude · 03" --provider claude --tag claude \
+  --url https://claude.ai/ --window 1280x800 --geoip --proxy-from-account claude02
+```
+
+`--geoip` 与 `--locale/--timezone` 互斥；`--proxy`、`--proxy-ref`、`--proxy-from-account` 三选一。
 
 ## 从 1Password 批量配置
 
@@ -90,6 +103,10 @@ proxy_ref = "env://SERVICE_PROXY"
 4. 固定窗口、语言和时区。`geoip = true` 时首次通过账号代理解析地理位置/时区/语言并固化；后续不重新采样。更改这些配置会拒绝启动，不会悄悄重建。
 5. 记录 Camoufox、BrowserForge、Playwright 版本及浏览器二进制 SHA-256。运行时变更会拒绝启动；不要盲目更新依赖或重新 fetch。
 
+浏览器版本由 `scripts/patch_camoufox.py` 钉在 `135.0.1-beta.24`。上游已发布更新的版本，而 Camoufox 默认会自动取"第一个受支持的"版本，一旦升级就与上面第 5 点固化的运行时不符，所有账号环境都会拒绝启动（`CamoufoxFetcher.install()` 还会先删掉原有安装再下载）。同一个脚本还把 GeoIP 数据库改为走 GitHub 的 `latest/download` 直链：`GeoLite2-City.mmdb` 存在 `site-packages` 而不随 wheel 发布，重建 venv 会连带删掉，而原本的下载路径走限流的 GitHub API（共享出口 IP 常被耗尽）。
+
+两处补丁都改在 `venv/` 内、而 `venv/` 不入库，因此**每次重建虚拟环境或 `pip install` 之后都要重新执行一次**；`pytest` 会检查补丁是否在位，`--check` 可单独校验。
+
 这是对管理范围内指纹配置的稳定性保证，**不保证网站看到的所有特征永久不变或绕过风控**：出口 IP、硬件、系统字体、浏览器安全升级、网站采集算法等仍可能影响结果。换设备前先备份并验证。不同账号可有相同分辨率或 UA，但完整配置及随机种子不同。
 
 新账号 WebRTC 默认关闭以避免真实网络信息泄露，视频通话功能因此受限；不自动装载 Camoufox 默认扩展。旧 profile 的兼容模式保留原 WebRTC/默认扩展行为，GeoIP 时保留其 WebRTC IP 设置。不要直接改固化文件或升级旧环境扩展。
@@ -136,7 +153,7 @@ accounts.toml                    # 本机账号配置（Git 忽略）
 
 新配置的代理只支持无认证 URL 或 `op://` / `env://` 引用；旧兼容模式额外允许直接引用原 `meta.json`。旧文件中的明文密码仍需你自行迁移到 1Password，本工具不擅自覆盖。本地 Playwright 控制连接会合并 `NO_PROXY`；这不等于所有浏览器内网访问都会自动绕过上游代理。Chrome/Chromium、远程调试端口、跨账号共享 cookie、批量自动登录均不在范围内。
 
-多个账号复用同一代理时，可设置 `proxy_from_account = "claude02"`。
+多个账号复用同一代理时，可设置 `proxy_from_account = "claude02"`（等价的命令行参数是 `accountctl add --proxy-from-account claude02`，`adopt-profile` 同名参数用于旧 `meta.json` 没有代理的情况）。
 这只复用代理来源，不共享指纹、Cookies 或窗口设置，也不复制代理密码。
 被引用的账号必须保留在配置中；循环引用、未知账号或未配置代理都会被拒绝。
 
