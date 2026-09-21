@@ -7,6 +7,7 @@ from pathlib import Path
 
 import portalocker
 
+from .browser_patch import ensure_patched
 from .config import Account, load_catalog
 from .errors import WorkspaceError
 from .fingerprint import browser_options, prepare_fingerprint, restore_legacy_window
@@ -87,6 +88,8 @@ def main() -> int:
     parser.add_argument("--no-urls", action="store_true")
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
+    # Spawned as its own process, so it repairs the pin independently of the CLI.
+    ensure_patched()
     catalog = load_catalog(args.config)
     account = catalog.select([args.account], [], False)[0]
     try:
