@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Pin the Camoufox browser build, and resolve GeoIP without the GitHub API.
 
+Applied automatically: every `accountctl` run calls `ensure_patched()` before
+touching the browser, so a rebuilt venv or an evicted cache repairs itself
+instead of failing.
+
 Two edits, both applied to the camoufox package inside the venv.
 
 1. Pin the browser (pkgman.py)
@@ -31,13 +35,17 @@ exhausted on this shared network. GitHub's `releases/latest/download/`
 redirect serves the same asset without spending quota, so prefer it and keep
 the API as a fallback. Upstream 0.5.x made the same move.
 
-Both edits live here, not in the venv, because `venv/` is gitignored: any
-`pip install` or venv rebuild drops them and silently re-arms both problems.
+The edits are kept here rather than in the venv because `venv/` is gitignored:
+any `pip install` or venv rebuild drops them and silently re-arms both
+problems.
 
 Usage
 -----
-    python scripts/patch_camoufox.py            # apply (idempotent)
-    python scripts/patch_camoufox.py --check    # verify only, non-zero if unpatched
+Normally nothing to run -- `accountctl` applies this itself. To drive it by
+hand:
+
+    python -m account_workspaces.browser_patch            # apply (idempotent)
+    python -m account_workspaces.browser_patch --check    # verify only
 
 Run it with the interpreter whose camoufox you mean to patch -- it patches the
 camoufox importable from `sys.path`, and refuses any version other than the
@@ -48,6 +56,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import shutil
 import sys
 from pathlib import Path
 
@@ -65,7 +74,7 @@ MARKER = "account-workspaces:pinned-browser"
 _CONSTANTS_ANCHOR = 'LOCAL_DATA: Path = Path(os.path.abspath(__file__)).parent\n'
 
 _CONSTANTS = f'''
-# {MARKER} -- see scripts/patch_camoufox.py for why this is pinned.
+# {MARKER} -- see account_workspaces/browser_patch.py for why this is pinned.
 # Only the browser is pinned; every other downloader (notably the GeoIP
 # database) still resolves through the GitHub API.
 PINNED_BROWSER_VERSION: str = {PINNED_BROWSER!r}
@@ -164,7 +173,7 @@ _MMDB = '''    def missing_asset_error(self) -> None:
 
     def pinned_releases(self) -> List[Dict]:
         """
-        account-workspaces:pinned-browser -- see scripts/patch_camoufox.py.
+        account-workspaces:pinned-browser -- see account_workspaces/browser_patch.py.
 
         Resolve the database through GitHub's `latest/download` redirect, which
         serves the newest release without spending the rate-limited API quota.
@@ -261,6 +270,104 @@ def check_version() -> None:
         )
 
 
+def apply() -> list[str]:
+    """Apply any missing edits. Returns the names of files actually changed."""
+    check_version()
+    changed = []
+    for name, edits in TARGETS:
+        path = module_path(name)
+        source = path.read_text()
+        if is_patched(source):
+            continue
+        path.write_text(patch_source(source, edits))
+        changed.append(path.name)
+    return changed
+
+
+def _install_dir() -> Path:
+    from camoufox.pkgman import INSTALL_DIR
+
+    return Path(INSTALL_DIR)
+
+
+def _vault_dir() -> Path:
+    """Where the pinned browser is kept safe from cache eviction."""
+    from platformdirs import user_data_dir
+
+    return Path(user_data_dir("account-workspaces")) / "browser" / PINNED_BROWSER
+
+
+def _installed_version(path: Path) -> str | None:
+    try:
+        import orjson
+
+        data = orjson.loads((path / "version.json").read_bytes())
+        return f"{data['version']}-{data['release']}"
+    except Exception:
+        return None
+
+
+def ensure_browser() -> str | None:
+    """Keep a copy of the pinned browser outside the OS cache, and restore it.
+
+    Camoufox installs under `~/Library/Caches`, which macOS and cleanup tools
+    are free to purge -- and that happened here on 2026-09-21. A missing
+    install is not a small problem: the next launch re-downloads whatever
+    upstream calls current, which matches no existing frozen fingerprint.
+
+    Restoring from a local copy also avoids re-downloading ~600MB, and cannot
+    silently substitute a different build the way a fresh fetch would.
+
+    Returns a message when it did something, else None.
+    """
+    install, vault = _install_dir(), _vault_dir()
+
+    if _installed_version(install) == PINNED_BROWSER:
+        if _installed_version(vault) != PINNED_BROWSER:
+            vault.parent.mkdir(parents=True, exist_ok=True)
+            # Stage first: a copy interrupted midway must not look complete.
+            staging = vault.with_name(f"{vault.name}.partial")
+            shutil.rmtree(staging, ignore_errors=True)
+            shutil.copytree(install, staging, symlinks=True)
+            shutil.rmtree(vault, ignore_errors=True)
+            staging.rename(vault)
+            return f"已备份钉定浏览器到 {vault}"
+        return None
+
+    if _installed_version(vault) != PINNED_BROWSER:
+        return None  # Nothing to restore from; let the caller's own checks speak.
+
+    shutil.rmtree(install, ignore_errors=True)
+    install.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(vault, install, symlinks=True)
+    return f"浏览器缓存已丢失，已从本地副本还原 {PINNED_BROWSER}"
+
+
+def ensure_patched() -> None:
+    """Repair the venv's camoufox in place, before anything launches a browser.
+
+    Called on every `accountctl` run: the edits live in gitignored venv code,
+    so a `pip install` or a rebuilt venv silently drops them. Self-healing
+    here means the pin cannot quietly lapse and take every frozen fingerprint
+    with it. The browser install is guarded the same way, since it sits in a
+    cache directory the OS may reclaim.
+
+    Deliberately quiet on success and non-fatal on failure -- if camoufox is
+    missing or restructured, the commands that actually need a browser fail on
+    their own with a better message than this could give.
+    """
+    try:
+        if changed := apply():
+            print(
+                f"已自动修复 camoufox 补丁（{', '.join(changed)}）：浏览器锁定 {PINNED_BROWSER}",
+                file=sys.stderr,
+            )
+        if note := ensure_browser():
+            print(note, file=sys.stderr)
+    except (PatchError, OSError, ImportError):
+        return
+
+
 def report_browser_drift() -> str | None:
     """Warn if the installed browser differs from the pinned build."""
     try:
@@ -304,7 +411,7 @@ def main(argv: list[str] | None = None) -> int:
         if unpatched:
             for path in unpatched:
                 print(f"UNPATCHED {path}", file=sys.stderr)
-            print("run: python scripts/patch_camoufox.py", file=sys.stderr)
+            print("run: python -m account_workspaces.browser_patch", file=sys.stderr)
             return 1
         print(f"browser pinned to {PINNED_BROWSER}; GeoIP resolves without the GitHub API")
     except PatchError as exc:

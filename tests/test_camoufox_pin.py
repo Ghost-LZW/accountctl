@@ -1,4 +1,4 @@
-"""Guard the Camoufox patches applied by scripts/patch_camoufox.py.
+"""Guard the Camoufox patches applied by account_workspaces.browser_patch.
 
 The patches pin the browser build (so CamoufoxFetcher cannot upgrade it out
 from under our frozen fingerprints) and take the GeoIP download off the
@@ -6,24 +6,13 @@ rate-limited GitHub API. They live in gitignored venv code, so these tests
 check both the patcher's logic and that the live venv is actually patched.
 """
 
-import importlib.util
-import sys
+import json
+import shutil
 from pathlib import Path
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
-
-
-def load_patcher():
-    spec = importlib.util.spec_from_file_location("patch_camoufox", SCRIPTS / "patch_camoufox.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["patch_camoufox"] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-patcher = load_patcher()
+from account_workspaces import browser_patch as patcher
 
 
 def unpatch(source: str, edits) -> str:
@@ -48,7 +37,7 @@ def pristine_locale():
 def test_every_target_is_patched_in_the_venv(target):
     """A venv rebuild silently drops the patches."""
     source = Path(patcher.module_path(target)).read_text()
-    assert patcher.is_patched(source), "run: python scripts/patch_camoufox.py"
+    assert patcher.is_patched(source), "run: python -m account_workspaces.browser_patch"
 
 
 def test_patch_is_idempotent(pristine_pkgman):
@@ -113,3 +102,52 @@ def test_pin_matches_the_installed_browser():
     from camoufox.pkgman import Version
 
     assert Version.from_path().full_string == patcher.PINNED_BROWSER
+
+
+def test_ensure_patched_repairs_a_rebuilt_venv():
+    """A pip install or fresh venv drops the edits; the next run must restore them."""
+    targets = [(Path(patcher.module_path(n)), e) for n, e in patcher.TARGETS]
+    originals = [p.read_text() for p, _ in targets]
+    try:
+        for (path, edits), text in zip(targets, originals, strict=True):
+            path.write_text(unpatch(text, edits))
+        patcher.ensure_patched()
+        for path, _ in targets:
+            assert patcher.is_patched(path.read_text()), f"{path.name} was not repaired"
+    finally:
+        for (path, _), text in zip(targets, originals, strict=True):
+            path.write_text(text)
+
+
+def test_ensure_browser_restores_an_evicted_cache(tmp_path, monkeypatch):
+    """~/Library/Caches is reclaimable; losing it must not trigger a re-download."""
+    install, vault = tmp_path / "install", tmp_path / "vault"
+    monkeypatch.setattr(patcher, "_install_dir", lambda: install)
+    monkeypatch.setattr(patcher, "_vault_dir", lambda: vault)
+
+    version = {"version": "135.0.1", "release": "beta.24"}
+    install.mkdir()
+    (install / "version.json").write_text(json.dumps(version))
+    (install / "payload.bin").write_bytes(b"pinned build")
+
+    assert "已备份" in (patcher.ensure_browser() or "")
+    assert patcher.ensure_browser() is None, "backup should not be redone every run"
+
+    shutil.rmtree(install)
+    assert "还原" in (patcher.ensure_browser() or "")
+    assert (install / "payload.bin").read_bytes() == b"pinned build"
+
+
+def test_ensure_browser_does_not_overwrite_a_matching_install(tmp_path, monkeypatch):
+    """Never clobber a good install: it is what the frozen fingerprints hash."""
+    install, vault = tmp_path / "install", tmp_path / "vault"
+    monkeypatch.setattr(patcher, "_install_dir", lambda: install)
+    monkeypatch.setattr(patcher, "_vault_dir", lambda: vault)
+    version = json.dumps({"version": "135.0.1", "release": "beta.24"})
+    for path, payload in ((install, b"live"), (vault, b"stale")):
+        path.mkdir()
+        (path / "version.json").write_text(version)
+        (path / "payload.bin").write_bytes(payload)
+
+    assert patcher.ensure_browser() is None
+    assert (install / "payload.bin").read_bytes() == b"live"

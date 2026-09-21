@@ -8,6 +8,7 @@ import tomllib
 from pathlib import Path
 
 from . import __version__
+from .browser_patch import ensure_patched
 from .config import (
     add_accounts,
     default_config,
@@ -284,7 +285,10 @@ def execute(args) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     try:
-        return execute(parser().parse_args(argv))
+        args = parser().parse_args(argv)
+        # The pin lives in gitignored venv code; repair it before it matters.
+        ensure_patched()
+        return execute(args)
     except WorkspaceError as error:
         print(f"错误：{error}", file=sys.stderr)
         return 1
