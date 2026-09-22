@@ -87,7 +87,7 @@ proxy_ref = "env://SERVICE_PROXY"
 1. 首次为每个账号单独生成 `fingerprint.json`，并保存完整生效配置到 `workspace.json`。
 2. 之后直接复用生效配置，跳过随机生成；校验输入和生效配置哈希。
 3. 绑定账号 ID，拒绝将已有 profile 复制给另一账号。不同账号的随机参数独立生成，`doctor` 检查重复指纹。
-4. 固定窗口、语言和时区。`geoip = true` 时首次通过账号代理解析地理位置/时区/语言并固化；后续不重新采样。更改这些配置会拒绝启动，不会悄悄重建。
+4. 固定窗口、语言和时区。`geoip = true` 时首次通过账号代理解析地理位置/时区/语言并固化；后续不重新采样。更改这些配置会拒绝启动，不会悄悄重建。分流代理下不要用 `geoip`，见 [locale / timezone 必须与代理出口一致](#locale--timezone-必须与代理出口一致)。
 5. 记录 Camoufox、BrowserForge、Playwright 版本及浏览器二进制 SHA-256。运行时变更会拒绝启动；不要盲目更新依赖或重新 fetch。
 
 这是对管理范围内指纹配置的稳定性保证，**不保证网站看到的所有特征永久不变或绕过风控**：出口 IP、硬件、系统字体、浏览器安全升级、网站采集算法等仍可能影响结果。换设备前先备份并验证。不同账号可有相同分辨率或 UA，但完整配置及随机种子不同。
@@ -95,6 +95,36 @@ proxy_ref = "env://SERVICE_PROXY"
 新账号 WebRTC 默认关闭以避免真实网络信息泄露，视频通话功能因此受限；不自动装载 Camoufox 默认扩展。旧 profile 的兼容模式保留原 WebRTC/默认扩展行为，GeoIP 时保留其 WebRTC IP 设置。不要直接改固化文件或升级旧环境扩展。
 
 版本升级不是永久禁止：先备份完整 profile，使用新测试账号验证新版本，再规划迁移；当前版本故意不提供“一键重置指纹”，避免误改已登录身份。
+
+## locale / timezone 必须与代理出口一致
+
+浏览器报告的语言和时区要和**代理实际出口 IP** 对得上。美国出口配 `Asia/Shanghai` 是明显的风控信号，比不配代理更可疑。
+
+`geoip = true` 只在代理是**全局**出口时才正确。分流代理（Clash/mihomo 的 `mode: rule`）下 GeoIP 探测请求往往走直连，解析到的是本地位置而不是目标站点实际走的节点。这种情况下要显式写死：
+
+```bash
+# 1. 查代理对该站点的真实出口。用一个被规则指到同一节点的域名，
+#    例如 mihomo 配置里 ipinfo.io 与 claude.ai 同为 US-Proxy。
+curl -x "http://user:pass@proxy-host:7897" https://ipinfo.io/json
+
+# 2. 把返回的 timezone 和对应语言写进账号配置，不要用 geoip。
+```
+
+```toml
+[accounts.browser]
+proxy_ref = "op://Private/l4dev-clash-proxy/proxy"
+locale = "en-US"
+timezone = "America/New_York"
+```
+
+验证时**必须在真实页面上读取**：`about:blank` 拿不到注入值。分流代理下也不要用 `ip-api.com` 之类未被规则覆盖的域名探测，那测的是直连出口。
+
+```python
+page.goto("https://example.com/")
+page.evaluate("[Intl.DateTimeFormat().resolvedOptions().timeZone, new Date().getTimezoneOffset()]")
+```
+
+注意 Camoufox 0.4.11 的 `timezone` **配置项本身不生效**（`locale` 生效），实测 JS 仍报告宿主时区。本仓库因此在 `browser_options` 里同时注入 `TZ` 环境变量，这才是浏览器真正认的。升级 Camoufox 后需重新验证这一行是否仍必要。
 
 ## 接入现有 profiles/
 
