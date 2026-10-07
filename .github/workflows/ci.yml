@@ -13,6 +13,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: pip install -e '.[dev]'
+      - run: python -m account_workspaces.browser_patch
       - run: ruff check src tests
       - run: ruff format --check src tests
       - run: python -m pytest
