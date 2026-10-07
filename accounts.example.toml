@@ -1,0 +1,50 @@
+# 复制为 accounts.toml，或使用 accountctl init + add / import-1password。
+# accounts.toml 与 .account-workspaces/ 默认不会提交到 Git。
+version = 1
+state_dir = ".account-workspaces"
+
+[defaults]
+urls = ["about:blank"]
+
+[defaults.browser]
+window = [1440, 900]
+locale = "en-US"
+timezone = "UTC"
+# proxy = "http://127.0.0.1:7890"    # 无密码代理
+# proxy_ref = "env://BROWSER_PROXY" # 带认证信息的代理只允许引用
+# 可用 geoip=true 在首次启动时按代理 IP 初始化并固化，此时不要设置 locale/timezone。
+
+[[accounts]]
+id = "google-personal"
+label = "Google · Personal"
+provider = "google"
+tags = ["google", "personal"]
+urls = ["https://accounts.google.com/", "https://mail.google.com/"]
+
+[accounts.credentials]
+username_ref = "op://Private/google-personal/username"
+password_ref = "op://Private/google-personal/password"
+# op_account = "my.1password.com"
+
+[[accounts]]
+id = "google-work"
+label = "Google · Work"
+provider = "google"
+tags = ["google", "work"]
+urls = ["https://accounts.google.com/"]
+
+[accounts.browser]
+window = [1600, 1000]
+locale = "en-US"
+timezone = "America/New_York"
+
+[accounts.credentials]
+username_ref = "op://Work/google-work/username"
+password_ref = "op://Work/google-work/password"
+
+[[accounts]]
+id = "custom-service"
+label = "任意网站账号"
+provider = "custom"
+tags = ["personal"]
+urls = ["https://example.com/"]

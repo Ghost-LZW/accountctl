@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "account-workspaces"
+version = "0.1.0"
+description = "Configurable, isolated browser workspaces for multiple accounts"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = [
+  # Pinned:固化指纹绑定了运行时版本，升级会使已有账号环境拒绝启动。
+  # 浏览器构建另由 scripts/patch_camoufox.py 钉定，重建 venv 后需重跑。
+  "camoufox[geoip]==0.4.11",
+  "browserforge==1.2.4",
+  "playwright==1.58.0",
+  "portalocker>=3.2,<4",
+  "tomlkit>=0.13,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "ruff>=0.11,<1", "build>=1,<2"]
+
+[project.scripts]
+accountctl = "account_workspaces.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = ["browser: opt-in real browser integration tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+include = ["src/**/*.py", "tests/**/*.py", "scripts/**/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
