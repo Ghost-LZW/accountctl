@@ -80,6 +80,8 @@ _CONSTANTS = f"""
 PINNED_BROWSER_VERSION: str = {PINNED_BROWSER!r}
 PINNED_BROWSER_ASSETS: frozenset = frozenset(
     {{
+        'camoufox-{PINNED_BROWSER}-lin.arm64.zip',
+        'camoufox-{PINNED_BROWSER}-lin.x86_64.zip',
         'camoufox-{PINNED_BROWSER}-mac.arm64.zip',
         'camoufox-{PINNED_BROWSER}-mac.x86_64.zip',
         'camoufox-{PINNED_BROWSER}-win.x86_64.zip',
