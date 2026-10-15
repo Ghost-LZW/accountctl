@@ -13,6 +13,9 @@ timezone = "UTC"
 # proxy = "http://127.0.0.1:7890"    # 无密码代理
 # proxy_ref = "env://BROWSER_PROXY" # 带认证信息的代理只允许引用
 # 可用 geoip=true 在首次启动时按代理 IP 初始化并固化，此时不要设置 locale/timezone。
+# 注意：Clash/mihomo 等分流代理（mode: rule）下 geoip 探测可能走直连，
+# 解析到本地位置而非目标站点实际出口。这时改为显式写死 locale/timezone，
+# 值取自被同一规则覆盖的域名探测结果。详见 README。
 
 [[accounts]]
 id = "google-personal"

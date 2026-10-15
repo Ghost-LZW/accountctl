@@ -212,9 +212,14 @@ def browser_options(account: Account, manifest: dict, *, headless: bool, proxy: 
     from camoufox.utils import get_env_vars, get_target_os
 
     config = manifest["effective"]["config"]
+    env = browser_environment(get_env_vars(config, get_target_os(config)))
+    # Camoufox's `timezone` config key is silently ignored by the bundled build: JS still
+    # reports the host zone. TZ is what the browser process actually honors, so set both.
+    if config.get("timezone"):
+        env["TZ"] = config["timezone"]
     return {
         "executable_path": str(installed_executable()),
-        "env": browser_environment(get_env_vars(config, get_target_os(config))),
+        "env": env,
         "firefox_user_prefs": dict(manifest["effective"]["prefs"]),
         "headless": headless,
         "proxy": proxy,

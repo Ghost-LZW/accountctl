@@ -6,6 +6,7 @@ import pytest
 from account_workspaces.errors import WorkspaceError
 from account_workspaces.fingerprint import (
     browser_environment,
+    browser_options,
     digest,
     installed_executable,
     prepare_fingerprint,
@@ -100,6 +101,27 @@ def test_child_environment_excludes_secrets_and_injected_config(monkeypatch):
     assert result["CAMOU_CONFIG_1"] == "fixed"
     assert "OP_SERVICE_ACCOUNT_TOKEN" not in result
     assert "MY_PROXY_PASSWORD" not in result
+
+
+def test_frozen_timezone_reaches_browser_via_tz(catalog, monkeypatch):
+    """Camoufox's `timezone` config key alone is ignored by the bundled build."""
+    account = catalog.accounts[0]
+    manifest = manifest_for(account)
+    manifest["effective"]["config"]["timezone"] = "America/New_York"
+    monkeypatch.setattr(
+        "account_workspaces.fingerprint.installed_executable", lambda: "/nonexistent/camoufox"
+    )
+    options = browser_options(account, manifest, headless=True, proxy=None)
+    assert options["env"]["TZ"] == "America/New_York"
+
+
+def test_no_timezone_leaves_tz_unset(catalog, monkeypatch):
+    account = catalog.accounts[0]
+    monkeypatch.setattr(
+        "account_workspaces.fingerprint.installed_executable", lambda: "/nonexistent/camoufox"
+    )
+    options = browser_options(account, manifest_for(account), headless=True, proxy=None)
+    assert "TZ" not in options["env"]
 
 
 def test_state_write_is_private(catalog):
