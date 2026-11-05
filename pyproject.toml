@@ -7,6 +7,8 @@ name = "account-workspaces"
 version = "0.1.0"
 description = "Configurable, isolated browser workspaces for multiple accounts"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
   # Pinned:固化指纹绑定了运行时版本，升级会使已有账号环境拒绝启动。
@@ -19,7 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<10", "ruff>=0.11,<1", "build>=1,<2"]
+dev = ["pytest>=8,<10", "ruff==0.16.8", "build>=1,<2"]
 
 [project.scripts]
 accountctl = "account_workspaces.cli:main"

@@ -99,8 +99,10 @@ def test_geoip_downloader_selects_the_city_database():
 
 def test_pin_matches_the_installed_browser():
     """A pin that disagrees with the install would fail every manifest check."""
-    from camoufox.pkgman import Version
+    from camoufox.pkgman import INSTALL_DIR, Version
 
+    if not (INSTALL_DIR / "version.json").exists():
+        pytest.skip("Camoufox browser not installed; run: python -m camoufox fetch")
     assert Version.from_path().full_string == patcher.PINNED_BROWSER
 
 

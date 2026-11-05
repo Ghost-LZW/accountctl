@@ -71,21 +71,40 @@ EXPECTED_CAMOUFOX = "0.4.11"
 # Present in patched files only; makes re-applying a no-op.
 MARKER = "account-workspaces:pinned-browser"
 
-_CONSTANTS_ANCHOR = 'LOCAL_DATA: Path = Path(os.path.abspath(__file__)).parent\n'
+_CONSTANTS_ANCHOR = "LOCAL_DATA: Path = Path(os.path.abspath(__file__)).parent\n"
 
-_CONSTANTS = f'''
+_CONSTANTS = f"""
 # {MARKER} -- see account_workspaces/browser_patch.py for why this is pinned.
 # Only the browser is pinned; every other downloader (notably the GeoIP
 # database) still resolves through the GitHub API.
 PINNED_BROWSER_VERSION: str = {PINNED_BROWSER!r}
 PINNED_BROWSER_ASSETS: frozenset = frozenset(
     {{
+        'camoufox-{PINNED_BROWSER}-lin.arm64.zip',
+        'camoufox-{PINNED_BROWSER}-lin.x86_64.zip',
         'camoufox-{PINNED_BROWSER}-mac.arm64.zip',
         'camoufox-{PINNED_BROWSER}-mac.x86_64.zip',
         'camoufox-{PINNED_BROWSER}-win.x86_64.zip',
     }}
 )
-'''
+"""
+
+# Earlier releases of this module pinned mac/win only; a venv patched by one of
+# them must be repaired rather than left with the narrower platform set.
+_STALE_CONSTANTS = (
+    "\n# account-workspaces:pinned-browser -- see account_workspaces/browser_patch.py "
+    "for why this is pinned.\n"
+    "# Only the browser is pinned; every other downloader (notably the GeoIP\n"
+    "# database) still resolves through the GitHub API.\n"
+    "PINNED_BROWSER_VERSION: str = '135.0.1-beta.24'\n"
+    "PINNED_BROWSER_ASSETS: frozenset = frozenset(\n"
+    "    {\n"
+    "        'camoufox-135.0.1-beta.24-mac.arm64.zip',\n"
+    "        'camoufox-135.0.1-beta.24-mac.x86_64.zip',\n"
+    "        'camoufox-135.0.1-beta.24-win.x86_64.zip',\n"
+    "    }\n"
+    ")\n"
+)
 
 _GET_ASSET_ANCHOR = '''    def get_asset(self) -> Any:
         """
@@ -120,7 +139,7 @@ _GET_ASSET = '''    def pinned_releases(self) -> List[Dict]:
             releases = resp.json()
 '''
 
-_FETCHER_ANCHOR = '        self.fetch_latest()\n'
+_FETCHER_ANCHOR = "        self.fetch_latest()\n"
 
 _FETCHER = '''        self.fetch_latest()
 
@@ -164,9 +183,9 @@ _EDITS = (
 # redirect serves the same asset without touching the API, so use it directly
 # and keep the API only as a fallback. Upstream 0.5.x made the same move.
 
-_MMDB_ANCHOR = '''    def missing_asset_error(self) -> None:
+_MMDB_ANCHOR = """    def missing_asset_error(self) -> None:
         raise MissingRelease('Failed to find GeoIP database release asset')
-'''
+"""
 
 _MMDB = '''    def missing_asset_error(self) -> None:
         raise MissingRelease('Failed to find GeoIP database release asset')
@@ -206,12 +225,27 @@ def is_patched(source: str) -> bool:
     return MARKER in source
 
 
+def is_current(source: str) -> bool:
+    """A patch from an older release must be rewritten, not treated as done."""
+    return is_patched(source) and _STALE_CONSTANTS not in source
+
+
+def unpatch_source(source: str, edits) -> str:
+    """Undo a previous application by restoring every anchor."""
+    for _, anchor, replacement in edits:
+        source = source.replace(replacement, anchor)
+    return source
+
+
 def patch_source(source: str, edits=_EDITS) -> str:
     """Return `source` with `edits` applied.
 
     Raises PatchError if any anchor is missing or ambiguous, so an upstream
     restructure fails loudly instead of half-applying.
     """
+    if is_patched(source) and not is_current(source):
+        source = source.replace(_STALE_CONSTANTS, "")
+        source = unpatch_source(source, edits)
     if is_patched(source):
         return source
     for label, anchor, replacement in edits:
@@ -277,7 +311,7 @@ def apply() -> list[str]:
     for name, edits in TARGETS:
         path = module_path(name)
         source = path.read_text()
-        if is_patched(source):
+        if is_current(source):
             continue
         path.write_text(patch_source(source, edits))
         changed.append(path.name)
@@ -399,7 +433,7 @@ def main(argv: list[str] | None = None) -> int:
         for name, edits in TARGETS:
             path = module_path(name)
             source = path.read_text()
-            if is_patched(source):
+            if is_current(source):
                 print(f"already patched: {path.name}")
                 continue
             if args.check:
