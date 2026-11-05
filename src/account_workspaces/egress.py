@@ -14,8 +14,9 @@ not trustworthy:
 
 * the probe requests are pinned to the proxy (``trust_env`` is off, so a local
   ``NO_PROXY`` cannot quietly turn them into direct requests);
-* two independent endpoints must agree on the exit IP, which exposes split
-  routing;
+* with the default probes, two independent endpoints must agree on the exit
+  IP, which exposes split routing (a configured ``probe_url`` replaces both,
+  because it is the one known to share the target's route);
 * the timezone and coordinates come from the local MaxMind database, not from
   whichever JSON endpoint happened to answer;
 * an explicitly configured ``locale``/``timezone`` is verified against the
