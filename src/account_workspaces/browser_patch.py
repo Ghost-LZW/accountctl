@@ -11,10 +11,11 @@ Two edits, both applied to the camoufox package inside the venv.
 ------------------------------
 `camoufox.pkgman.CamoufoxFetcher` resolves the browser download by asking the
 GitHub releases API for the *first supported* release. Upstream has since
-published newer builds (152.0.4-beta.29 at the time of writing), so an
-unpinned install would fetch a build newer than the one our frozen
-fingerprints are bound to. `runtime_identity()` records the browser version
-and the executable's SHA-256, and `verify_manifest()` refuses to launch on a
+published newer builds, so an unpinned install would fetch a build newer than
+the one our frozen fingerprints are bound to (the pin is the build the existing
+profiles were created with, not the newest release). `runtime_identity()`
+records the browser version and the executable's SHA-256, and
+`verify_manifest()` refuses to launch on a
 mismatch -- so an unpinned upgrade turns every existing account workspace into
 an unstartable one. `CamoufoxFetcher.install()` also starts with
 `shutil.rmtree(INSTALL_DIR)`, so it destroys the good install before
@@ -56,13 +57,14 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import re
 import shutil
 import sys
 from pathlib import Path
 
 # Single source of truth for the browser build. Must match the "browser" field
 # recorded in each profile's workspace.json by fingerprint.runtime_identity().
-PINNED_BROWSER = "135.0.1-beta.24"
+PINNED_BROWSER = "152.0.4-beta.30"
 
 # The camoufox release this patch's anchors were written against. A different
 # version may have restructured pkgman.py, so refuse rather than guess.
@@ -89,22 +91,10 @@ PINNED_BROWSER_ASSETS: frozenset = frozenset(
 )
 """
 
-# Earlier releases of this module pinned mac/win only; a venv patched by one of
-# them must be repaired rather than left with the narrower platform set.
-_STALE_CONSTANTS = (
-    "\n# account-workspaces:pinned-browser -- see account_workspaces/browser_patch.py "
-    "for why this is pinned.\n"
-    "# Only the browser is pinned; every other downloader (notably the GeoIP\n"
-    "# database) still resolves through the GitHub API.\n"
-    "PINNED_BROWSER_VERSION: str = '135.0.1-beta.24'\n"
-    "PINNED_BROWSER_ASSETS: frozenset = frozenset(\n"
-    "    {\n"
-    "        'camoufox-135.0.1-beta.24-mac.arm64.zip',\n"
-    "        'camoufox-135.0.1-beta.24-mac.x86_64.zip',\n"
-    "        'camoufox-135.0.1-beta.24-win.x86_64.zip',\n"
-    "    }\n"
-    ")\n"
-)
+# An older release of this module may have left a different pin (or a narrower
+# platform set) in the venv. Recognise the whole inserted block so it can be
+# removed and replayed instead of being mistaken for the current edit.
+_STALE_CONSTANTS = re.compile(rf"\n# {re.escape(MARKER)}[^\n]*\n.*?\n\)\n", re.S)
 
 _GET_ASSET_ANCHOR = '''    def get_asset(self) -> Any:
         """
@@ -225,9 +215,13 @@ def is_patched(source: str) -> bool:
     return MARKER in source
 
 
-def is_current(source: str) -> bool:
-    """A patch from an older release must be rewritten, not treated as done."""
-    return is_patched(source) and _STALE_CONSTANTS not in source
+def is_current(source: str, edits=_EDITS) -> bool:
+    """A patch with a different pin must be rewritten, not treated as done."""
+    if not is_patched(source):
+        return False
+    if edits is not _EDITS:  # the GeoIP edit carries no version
+        return True
+    return f"PINNED_BROWSER_VERSION: str = {PINNED_BROWSER!r}" in source
 
 
 def unpatch_source(source: str, edits) -> str:
@@ -243,8 +237,8 @@ def patch_source(source: str, edits=_EDITS) -> str:
     Raises PatchError if any anchor is missing or ambiguous, so an upstream
     restructure fails loudly instead of half-applying.
     """
-    if is_patched(source) and not is_current(source):
-        source = source.replace(_STALE_CONSTANTS, "")
+    if is_patched(source) and not is_current(source, edits):
+        source = _STALE_CONSTANTS.sub("", source, count=1)
         source = unpatch_source(source, edits)
     if is_patched(source):
         return source
@@ -311,7 +305,7 @@ def apply() -> list[str]:
     for name, edits in TARGETS:
         path = module_path(name)
         source = path.read_text()
-        if is_current(source):
+        if is_current(source, edits):
             continue
         path.write_text(patch_source(source, edits))
         changed.append(path.name)
@@ -433,7 +427,7 @@ def main(argv: list[str] | None = None) -> int:
         for name, edits in TARGETS:
             path = module_path(name)
             source = path.read_text()
-            if is_current(source):
+            if is_current(source, edits):
                 print(f"already patched: {path.name}")
                 continue
             if args.check:

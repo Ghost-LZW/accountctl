@@ -24,7 +24,7 @@ _Avoid_: 仅 fingerprint.json、每次随机防指纹、把时区写进指纹
 _Avoid_: 宿主时区、geoip 首次固化、手工抄写 locale/timezone
 
 **钉定浏览器（Pinned Browser）**：
-固化指纹所绑定的那一个 Camoufox 浏览器构建（`135.0.1-beta.24`），不是"当前受支持的最新版"。上游有更新的构建，而 Camoufox 默认解析成第一个受支持的版本，因此这个钉定是 Frozen Fingerprint 能成立的前提。
+固化指纹所绑定的那一个 Camoufox 浏览器构建（`152.0.4-beta.30`），不是"当前受支持的最新版"。上游有更新的构建，而 Camoufox 默认解析成第一个受支持的版本，因此这个钉定是 Frozen Fingerprint 能成立的前提。
 _Avoid_: 最新版浏览器、随 fetch 漂移
 
 **会话（Session）**：

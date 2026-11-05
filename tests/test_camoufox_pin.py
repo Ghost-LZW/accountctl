@@ -127,7 +127,7 @@ def test_ensure_browser_restores_an_evicted_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(patcher, "_install_dir", lambda: install)
     monkeypatch.setattr(patcher, "_vault_dir", lambda: vault)
 
-    version = {"version": "135.0.1", "release": "beta.24"}
+    version = {"version": "152.0.4", "release": "beta.30"}
     install.mkdir()
     (install / "version.json").write_text(json.dumps(version))
     (install / "payload.bin").write_bytes(b"pinned build")
@@ -145,7 +145,7 @@ def test_ensure_browser_does_not_overwrite_a_matching_install(tmp_path, monkeypa
     install, vault = tmp_path / "install", tmp_path / "vault"
     monkeypatch.setattr(patcher, "_install_dir", lambda: install)
     monkeypatch.setattr(patcher, "_vault_dir", lambda: vault)
-    version = json.dumps({"version": "135.0.1", "release": "beta.24"})
+    version = json.dumps({"version": "152.0.4", "release": "beta.30"})
     for path, payload in ((install, b"live"), (vault, b"stale")):
         path.mkdir()
         (path / "version.json").write_text(version)

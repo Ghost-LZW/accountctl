@@ -104,7 +104,7 @@ proxy_ref = "env://SERVICE_PROXY"
 4. 固定窗口。随机参数始终冻结；位置信号（时区、语言、坐标、WebRTC IP）则**每次启动前从代理出口重新推导**，见 [浏览器必须与出口一致](#浏览器必须与出口一致)。改语言/时区不再需要重建环境。
 5. 记录 Camoufox、BrowserForge、Playwright 版本及浏览器二进制 SHA-256。运行时变更会拒绝启动；不要盲目更新依赖或重新 fetch。
 
-浏览器版本由 `browser_patch` 模块钉在 `135.0.1-beta.24`。上游已发布更新的版本，而 Camoufox 默认会自动取"第一个受支持的"版本，一旦升级就与上面第 5 点固化的运行时不符，所有账号环境都会拒绝启动（`CamoufoxFetcher.install()` 还会先删掉原有安装再下载）。同一个模块还把 GeoIP 数据库改为走 GitHub 的 `latest/download` 直链：`GeoLite2-City.mmdb` 存在 `site-packages` 而不随 wheel 发布，重建 venv 会连带删掉，而原本的下载路径走限流的 GitHub API（共享出口 IP 常被耗尽）。
+浏览器版本由 `browser_patch` 模块钉在 `152.0.4-beta.30`。上游已发布更新的版本，而 Camoufox 默认会自动取"第一个受支持的"版本，一旦升级就与上面第 5 点固化的运行时不符，所有账号环境都会拒绝启动（`CamoufoxFetcher.install()` 还会先删掉原有安装再下载）。同一个模块还把 GeoIP 数据库改为走 GitHub 的 `latest/download` 直链：`GeoLite2-City.mmdb` 存在 `site-packages` 而不随 wheel 发布，重建 venv 会连带删掉，而原本的下载路径走限流的 GitHub API（共享出口 IP 常被耗尽）。
 
 这些修补由 `accountctl` 在每次运行时自动完成，**不需要你记住任何命令**：补丁改在不入库的 `venv/` 内，重建环境会丢失；浏览器装在 `~/Library/Caches`，可能被系统回收。两者都会在下次运行时自动还原（浏览器从 `~/Library/Application Support/account-workspaces/browser/` 下的本地副本恢复，不重新下载，因而不会换成别的构建）。需要手动检查时用 `python -m account_workspaces.browser_patch --check`。
 
