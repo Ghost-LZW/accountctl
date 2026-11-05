@@ -27,6 +27,9 @@ def session_status(account: Account) -> dict:
         "state": status.get("state", "starting"),
         "pid": status.get("pid"),
         "token": status.get("token"),
+        "egress": status.get("egress"),
+        "egress_verified": status.get("egress_verified"),
+        "egress_error": status.get("egress_error"),
     }
 
 

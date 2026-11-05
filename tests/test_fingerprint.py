@@ -33,7 +33,9 @@ def manifest_for(account):
 
 
 def test_restore_never_calls_random_generator(catalog, monkeypatch):
-    account = catalog.accounts[0]
+    account = replace(
+        catalog.accounts[0], browser=replace(catalog.accounts[0].browser, egress="off")
+    )
     manifest = manifest_for(account)
     write_json(account.profile / "workspace.json", manifest)
     monkeypatch.setattr(
@@ -124,6 +126,68 @@ def test_no_timezone_leaves_tz_unset(catalog, monkeypatch):
     assert "TZ" not in options["env"]
 
 
+def test_schema_one_is_migrated_and_location_is_released(catalog, monkeypatch):
+    account = catalog.accounts[0]
+    manifest = manifest_for(account)
+    manifest["effective"]["config"].update(
+        {"timezone": "UTC", "locale:language": "en", "locale:region": "US", "seed": 1}
+    )
+    manifest["fingerprint_id"] = digest(manifest["effective"])
+    write_json(account.profile / "workspace.json", manifest)
+    monkeypatch.setattr(
+        "account_workspaces.fingerprint.runtime_identity", lambda: manifest["runtime"]
+    )
+    migrated = prepare_fingerprint(account)
+    assert migrated["schema"] == 2
+    assert set(migrated["effective"]["config"]) == {"seed", "fonts:spacing_seed"}
+    assert migrated["fingerprint_id"] == digest(migrated["effective"])
+    assert read_json(account.profile / "workspace.json")["schema"] == 2
+    # The location is no longer part of what locks the profile.
+    changed = replace(account, browser=replace(account.browser, locale="de-DE"))
+    verify_manifest(changed, migrated, manifest["runtime"])
+    with pytest.raises(WorkspaceError, match="不一致"):
+        verify_manifest(
+            replace(changed, browser=replace(changed.browser, window=(900, 900))),
+            migrated,
+            manifest["runtime"],
+        )
+
+
+def test_off_policy_keeps_the_schema_one_manifest(catalog, monkeypatch):
+    account = replace(
+        catalog.accounts[0], browser=replace(catalog.accounts[0].browser, egress="off")
+    )
+    manifest = manifest_for(account)
+    write_json(account.profile / "workspace.json", manifest)
+    monkeypatch.setattr(
+        "account_workspaces.fingerprint.runtime_identity", lambda: manifest["runtime"]
+    )
+    assert prepare_fingerprint(account) == manifest
+
+
+def test_identity_reaches_env_and_prefs(catalog, monkeypatch):
+    from account_workspaces.egress import Egress
+
+    account = catalog.accounts[0]
+    identity = Egress("198.51.100.7", "US", "America/New_York", 25.7, -80.1, "en-US")
+    monkeypatch.setattr(
+        "account_workspaces.fingerprint.installed_executable", lambda: "/nonexistent/camoufox"
+    )
+    options = browser_options(
+        account,
+        manifest_for(account),
+        headless=True,
+        proxy=None,
+        identity=identity,
+    )
+    assert options["env"]["TZ"] == "America/New_York"
+    assert options["env"]["LANG"] == "en-US.UTF-8"
+    assert options["env"]["LC_ALL"] == "en-US.UTF-8"
+    assert options["firefox_user_prefs"]["intl.accept_languages"] == "en-US"
+    assert options["firefox_user_prefs"]["geo.provider.use_corelocation"] is False
+    assert options["firefox_user_prefs"]["media.peerconnection.enabled"] is True
+
+
 def test_state_write_is_private(catalog):
     manifest_for(catalog.accounts[0])
     assert read_json(catalog.accounts[0].profile / "fingerprint.json") == {"input": "fixed"}
@@ -161,12 +225,13 @@ def test_legacy_generation_keeps_geoip_proxy_and_freezes_once(catalog, monkeypat
 
     def generate(**kwargs):
         assert kwargs["proxy"] == proxy
-        assert kwargs["geoip"] is True
+        # The location is derived per launch, not sampled here.
+        assert kwargs["geoip"] is False
         assert kwargs["locale"] is None
         assert kwargs["block_webrtc"] is False
         assert kwargs["window"] == (1280, 800)
         assert kwargs["exclude_addons"] == []
-        kwargs["config"].update({"timezone": "Asia/Tokyo", "canvas:aaOffset": 7})
+        kwargs["config"].update({"fonts:spacing_seed": 7})
         return {"proxy": proxy}
 
     generator = Mock(side_effect=generate)
@@ -176,5 +241,6 @@ def test_legacy_generation_keeps_geoip_proxy_and_freezes_once(catalog, monkeypat
     assert first == second
     generator.assert_called_once()
     assert source.read_text() == original
-    assert first["effective"]["config"]["timezone"] == "Asia/Tokyo"
+    assert first["schema"] == 2
+    assert first["effective"]["config"]["fonts:spacing_seed"] == 7
     assert "secret" not in (account.profile / "workspace.json").read_text()

@@ -37,6 +37,8 @@ accountctl --config /absolute/path/accounts.toml list
 
 `--no-urls` 只影响本次启动，不修改 `accounts.toml`；想长期不打开网址，把账号的 `urls` 删掉即可继承 `[defaults]`（默认 `about:blank`）。`urls` 不参与指纹校验，改动它不需要重建环境。
 
+`doctor` 会按账号真实发起一次出口探测（因此会按需读取 `proxy_ref`，但不打印密码），并检查运行时、指纹与重复指纹。
+
 `add` 也可直接指定窗口、GeoIP 与代理来源，不必手工编辑 TOML：
 
 ```bash
@@ -44,7 +46,7 @@ accountctl add claude03 --label "Claude · 03" --provider claude --tag claude \
   --url https://claude.ai/ --window 1280x800 --geoip --proxy-from-account claude02
 ```
 
-`--geoip` 与 `--locale/--timezone` 互斥；`--proxy`、`--proxy-ref`、`--proxy-from-account` 三选一。
+`--proxy`、`--proxy-ref`、`--proxy-from-account` 三选一。位置默认跟随出口；`--geoip` 是 `--egress auto` 的兼容别名，可与 `--locale/--timezone` 同时使用（后者变成受校验的固定值）。`--egress`、`--webrtc`、`--probe-url` 见 [浏览器必须与出口一致](#浏览器必须与出口一致)。
 
 ## 从 1Password 批量配置
 
@@ -99,7 +101,7 @@ proxy_ref = "env://SERVICE_PROXY"
 1. 首次为每个账号单独生成 `fingerprint.json`，并保存完整生效配置到 `workspace.json`。
 2. 之后直接复用生效配置，跳过随机生成；校验输入和生效配置哈希。
 3. 绑定账号 ID，拒绝将已有 profile 复制给另一账号。不同账号的随机参数独立生成，`doctor` 检查重复指纹。
-4. 固定窗口、语言和时区。`geoip = true` 时首次通过账号代理解析地理位置/时区/语言并固化；后续不重新采样。更改这些配置会拒绝启动，不会悄悄重建。分流代理下不要用 `geoip`，见 [locale / timezone 必须与代理出口一致](#locale--timezone-必须与代理出口一致)。
+4. 固定窗口。随机参数始终冻结；位置信号（时区、语言、坐标、WebRTC IP）则**每次启动前从代理出口重新推导**，见 [浏览器必须与出口一致](#浏览器必须与出口一致)。改语言/时区不再需要重建环境。
 5. 记录 Camoufox、BrowserForge、Playwright 版本及浏览器二进制 SHA-256。运行时变更会拒绝启动；不要盲目更新依赖或重新 fetch。
 
 浏览器版本由 `browser_patch` 模块钉在 `135.0.1-beta.24`。上游已发布更新的版本，而 Camoufox 默认会自动取"第一个受支持的"版本，一旦升级就与上面第 5 点固化的运行时不符，所有账号环境都会拒绝启动（`CamoufoxFetcher.install()` 还会先删掉原有安装再下载）。同一个模块还把 GeoIP 数据库改为走 GitHub 的 `latest/download` 直链：`GeoLite2-City.mmdb` 存在 `site-packages` 而不随 wheel 发布，重建 venv 会连带删掉，而原本的下载路径走限流的 GitHub API（共享出口 IP 常被耗尽）。
@@ -108,39 +110,43 @@ proxy_ref = "env://SERVICE_PROXY"
 
 这是对管理范围内指纹配置的稳定性保证，**不保证网站看到的所有特征永久不变或绕过风控**：出口 IP、硬件、系统字体、浏览器安全升级、网站采集算法等仍可能影响结果。换设备前先备份并验证。不同账号可有相同分辨率或 UA，但完整配置及随机种子不同。
 
-新账号 WebRTC 默认关闭以避免真实网络信息泄露，视频通话功能因此受限；不自动装载 Camoufox 默认扩展。旧 profile 的兼容模式保留原 WebRTC/默认扩展行为，GeoIP 时保留其 WebRTC IP 设置。不要直接改固化文件或升级旧环境扩展。
+新账号默认启用 WebRTC，并把对外 IP 伪装成出口地址（`webrtc = "spoof"`）；可用 `block` 完全关闭、`keep` 不干预。旧 profile 的兼容模式默认 `keep`，保留原有 WebRTC/默认扩展行为。不自动装载 Camoufox 默认扩展。不要直接改固化文件或升级旧环境扩展。
 
 版本升级不是永久禁止：先备份完整 profile，使用新测试账号验证新版本，再规划迁移；当前版本故意不提供“一键重置指纹”，避免误改已登录身份。
 
-## locale / timezone 必须与代理出口一致
+## 浏览器必须与出口一致
 
-浏览器报告的语言和时区要和**代理实际出口 IP** 对得上。美国出口配 `Asia/Shanghai` 是明显的风控信号，比不配代理更可疑。
+上游能读到的位置信号必须与**代理的实际出口 IP** 一致。美国出口配 `Asia/Shanghai` 时区是明显的矛盾，比不配代理更可疑。为此每次 `start` 都按下面的顺序执行，**位置不参与指纹冻结**：
 
-`geoip = true` 只在代理是**全局**出口时才正确。分流代理（Clash/mihomo 的 `mode: rule`）下 GeoIP 探测请求往往走直连，解析到的是本地位置而不是目标站点实际走的节点。这种情况下要显式写死：
+1. 用浏览器同一个代理、并强制忽略本机 `NO_PROXY`，向两个独立端点查询出口 IP。
+2. 两个端点必须给出同一个 IP，否则视为分流不一致并拒绝启动。
+3. 用本地 MaxMind 数据库把这个 IP 解析成国家、城市、时区、坐标；语言取该国最常用的语言（同一国家内保持已选项不变）。
+4. 把时区同时写进 `TZ` 和 Camoufox 配置，语言写进 `CAMOU_CONFIG`、`LANG/LC_ALL`、`intl.accept_languages`，坐标写进 geolocation。
+5. 启动后在第一张真实页面回读 `Intl` 时区和 `navigator.language`，不符则关闭并报错。
 
-```bash
-# 1. 查代理对该站点的真实出口。用一个被规则指到同一节点的域名，
-#    例如 mihomo 配置里 ipinfo.io 与 claude.ai 同为 US-Proxy。
-curl -x "http://user:pass@proxy-host:7897" https://ipinfo.io/json
-
-# 2. 把返回的 timezone 和对应语言写进账号配置，不要用 geoip。
-```
+同时关闭宿主泄漏渠道：`geo.provider.use_corelocation/use_geoclue`、`javascript.use_us_english_locale`、`intl.regional_prefs.use_os_locales` 全关；`network.trr.mode=0` 且代理侧解析 DNS，避免 DoH 绕开代理；WebRTC 默认把对外 IP 换成出口 IP，并关闭 IPv6 候选。
 
 ```toml
 [accounts.browser]
 proxy_ref = "op://Private/l4dev-clash-proxy/proxy"
-locale = "en-US"
-timezone = "America/New_York"
+egress = "auto"          # 默认。出口换国家时跟随
+# egress = "strict"      # 换国家则拒绝启动，身份不跳变
+# egress = "warn"        # 回读不符只记录，不关闭
+# egress = "off"         # 退回旧行为：只用写死的 locale/timezone
+# webrtc = "block"       # 或不想要 WebRTC 时
 ```
 
-验证时**必须在真实页面上读取**：`about:blank` 拿不到注入值。分流代理下也不要用 `ip-api.com` 之类未被规则覆盖的域名探测，那测的是直连出口。
+`locale` / `timezone` 仍可写死，但会被校验：时区与出口时区相差超过 3 小时、或语言不是出口国前两位语言时拒绝启动。`en-US` + `America/New_York` 出口美国当然可以（同国的跨时区也放过）；`zh-CN` 出口美国就会被拒。
 
-```python
-page.goto("https://example.com/")
-page.evaluate("[Intl.DateTimeFormat().resolvedOptions().timeZone, new Date().getTimezoneOffset()]")
+**分流代理（Clash/mihomo `mode: rule`）**：探测域名若被规则送到别的节点或直连，第 2 步会报“出口不同”。把 `probe_url` 指向与你目标站点同规则的地址即可（例如规则里 `ipinfo.io` 与 `claude.ai` 同为 US-Proxy 时，`probe_url = "https://ipinfo.io/json"`）：
+
+```toml
+probe_url = "https://ipinfo.io/json"
 ```
 
-注意 Camoufox 0.4.11 的 `timezone` **配置项本身不生效**（`locale` 生效），实测 JS 仍报告宿主时区。本仓库因此在 `browser_options` 里同时注入 `TZ` 环境变量，这才是浏览器真正认的。升级 Camoufox 后需重新验证这一行是否仍必要。
+确认当前出口：`accountctl doctor` 会按账号执行完整探测并打印国家/时区；`accountctl status` 显示上次启动的出口与 `（未验证）` 标记。机器自己的 `curl` 结果不可信——它走的是另一个进程的路由。
+
+注意 Camoufox 0.4.11 的 `timezone` **配置项本身不生效**（`locale` 生效），实测 JS 仍报告宿主时区；本仓库额外注入 `TZ`。升级 Camoufox 后需重新验证。地理坐标由配置注入，但 `getCurrentPosition()` 在个别构建上会阻塞页面事件循环，所以启动回读只校验时区和语言。
 
 ## 接入现有 profiles/
 
@@ -204,4 +210,4 @@ ACCOUNT_WORKSPACES_LEGACY_TEST_PROFILE=profiles/claude02 \
   python -m pytest tests/test_legacy_compat.py -v
 ```
 
-结构与领域术语见 [CONTEXT.md](CONTEXT.md)，设计取舍见 [docs/adr/0001-frozen-camoufox.md](docs/adr/0001-frozen-camoufox.md)。
+结构与领域术语见 [CONTEXT.md](CONTEXT.md)，设计取舍见 [docs/adr/](docs/adr/)（指纹冻结、出口推导）。

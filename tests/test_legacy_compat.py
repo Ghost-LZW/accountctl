@@ -22,12 +22,13 @@ pytestmark = [
     ),
 ]
 
+# Location (languages/timezone) is derived per launch now and no longer part of
+# the frozen identity, so it is compared separately from the random parameters.
 STABLE_PROBE = """() => ({
   ua:navigator.userAgent, platform:navigator.platform,
-  languages:navigator.languages, cores:navigator.hardwareConcurrency,
+  cores:navigator.hardwareConcurrency,
   screen:[screen.width,screen.height,screen.availWidth,screen.availHeight],
-  window:[innerWidth,innerHeight,outerWidth,outerHeight],
-  timezone:Intl.DateTimeFormat().resolvedOptions().timeZone
+  window:[innerWidth,innerHeight,outerWidth,outerHeight]
 })"""
 
 

@@ -48,7 +48,9 @@ def test_atomic_add_preserves_comments_and_failed_update(catalog):
         {"id": "X"},
         {"id": "a", "password": "secret"},
         {"id": "a", "browser": {"engine": "chrome"}},
-        {"id": "a", "browser": {"geoip": True, "locale": "en-US"}},
+        {"id": "a", "browser": {"egress": "sometimes"}},
+        {"id": "a", "browser": {"webrtc": "maybe"}},
+        {"id": "a", "browser": {"probe_url": "http://me:secret@ipinfo.io/json"}},
         {"id": "a", "browser": {"window": [True, 900]}},
         {"id": "a", "browser": {"proxy": "http://me:secret@localhost:80"}},
         {"id": "a", "credentials": {"password_ref": "literal-secret"}},
@@ -65,6 +67,31 @@ def test_invalid_rows_fail_without_echoing_secrets(tmp_path, row):
     with pytest.raises(WorkspaceError) as error:
         parse_catalog(tmp_path / "c.toml", {"version": 1, "accounts": [row]})
     assert "secret" not in str(error.value)
+
+
+def test_geoip_is_now_a_compatible_alias(catalog):
+    from account_workspaces.config import parse_catalog
+
+    parsed = parse_catalog(
+        catalog.path,
+        {"version": 1, "accounts": [{"id": "a", "browser": {"geoip": True}}]},
+    )
+    assert parsed.accounts[0].browser.egress == "auto"
+
+
+def test_webrtc_defaults_follow_legacy(catalog):
+    from account_workspaces.config import parse_catalog
+
+    raw = {
+        "version": 1,
+        "accounts": [
+            {"id": "a"},
+            {"id": "b", "browser": {"legacy": True}},
+            {"id": "c", "browser": {"legacy": True, "webrtc": "spoof"}},
+        ],
+    }
+    parsed = parse_catalog(catalog.path, raw)
+    assert [a.browser.webrtc for a in parsed.accounts] == ["spoof", "keep", "spoof"]
 
 
 def test_shared_or_nested_profiles_rejected(tmp_path):

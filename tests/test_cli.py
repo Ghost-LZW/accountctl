@@ -120,7 +120,7 @@ def test_add_rejects_conflicting_proxy_sources(catalog):
     assert len(load_catalog(catalog.path).accounts) == 2
 
 
-def test_add_rejects_geoip_with_timezone(catalog, capsys):
+def test_add_geoip_keeps_explicit_timezone_as_a_verified_pin(catalog):
     assert (
         main(
             [
@@ -133,9 +133,35 @@ def test_add_rejects_geoip_with_timezone(catalog, capsys):
                 "Asia/Shanghai",
             ]
         )
-        == 1
+        == 0
     )
-    assert len(load_catalog(catalog.path).accounts) == 2
+    added = load_catalog(catalog.path).accounts[-1]
+    assert added.browser.egress == "auto"
+    assert added.browser.timezone == "Asia/Shanghai"
+
+
+def test_add_accepts_egress_and_probe_url(catalog):
+    assert (
+        main(
+            [
+                "--config",
+                str(catalog.path),
+                "add",
+                "claude07",
+                "--egress",
+                "strict",
+                "--webrtc",
+                "block",
+                "--probe-url",
+                "https://ipinfo.io/json",
+            ]
+        )
+        == 0
+    )
+    added = load_catalog(catalog.path).accounts[-1]
+    assert added.browser.egress == "strict"
+    assert added.browser.webrtc == "block"
+    assert added.browser.probe_url == "https://ipinfo.io/json"
 
 
 def test_add_rejects_bad_window(catalog):

@@ -12,6 +12,18 @@ from .errors import WorkspaceError
 from .storage import atomic_write, private_directory, read_json, write_json
 
 MANIFEST = "workspace.json"
+DYNAMIC_CONFIG = (
+    "timezone",
+    "locale:language",
+    "locale:region",
+    "locale:script",
+    "locale:all",
+    "geolocation:longitude",
+    "geolocation:latitude",
+    "geolocation:accuracy",
+    "webrtc:ipv4",
+    "webrtc:ipv6",
+)
 
 
 def digest(data: dict) -> str:
@@ -72,6 +84,7 @@ def runtime_identity() -> dict:
 
 
 def settings_identity(account: Account) -> dict:
+    """Schema 1: location was frozen into the fingerprint."""
     return {
         "window": list(account.browser.window),
         "locale": account.browser.locale,
@@ -81,14 +94,21 @@ def settings_identity(account: Account) -> dict:
     }
 
 
+def frozen_settings(account: Account) -> dict:
+    """Schema 2: location is re-derived from the exit on every start."""
+    return {"window": list(account.browser.window), "legacy": account.browser.legacy}
+
+
 def verify_manifest(account: Account, manifest: dict, runtime: dict) -> None:
-    if manifest.get("schema") != 1:
+    schema = manifest.get("schema")
+    if schema not in {1, 2}:
         raise WorkspaceError("不支持的 profile 格式；不会覆盖原数据")
     if manifest.get("account_id") != account.id:
         raise WorkspaceError("此 profile 已绑定其他账号；不能复用或复制为另一个账号")
     if manifest.get("runtime") != runtime:
         raise WorkspaceError("Camoufox/BrowserForge/Playwright 或浏览器二进制已变化；拒绝指纹漂移")
-    if manifest.get("settings") != settings_identity(account):
+    expected = settings_identity(account) if schema == 1 else frozen_settings(account)
+    if manifest.get("settings") != expected:
         raise WorkspaceError("窗口、语言或时区与固化指纹不一致；请恢复配置，或创建新的账号环境")
     effective = manifest.get("effective")
     if not isinstance(effective, dict) or digest(effective) != manifest.get("fingerprint_id"):
@@ -102,6 +122,22 @@ def verify_manifest(account: Account, manifest: dict, runtime: dict) -> None:
         raise WorkspaceError("原始 fingerprint.json 丢失或变化；请从备份恢复")
 
 
+def _migrate(manifest: dict, account: Account) -> dict:
+    """Schema 1 froze the location; schema 2 re-derives it from the exit."""
+    config = dict(manifest["effective"]["config"])
+    for key in DYNAMIC_CONFIG:
+        config.pop(key, None)
+    effective = {"config": config, "prefs": dict(manifest["effective"]["prefs"])}
+    migrated = {
+        **manifest,
+        "schema": 2,
+        "settings": frozen_settings(account),
+        "effective": effective,
+        "fingerprint_id": digest(effective),
+    }
+    return migrated
+
+
 def prepare_fingerprint(account: Account, *, proxy: dict | None = None) -> dict:
     """Caller must hold the profile lock for the entire browser lifetime."""
     from browserforge.fingerprints import Fingerprint, FingerprintGenerator, Screen
@@ -113,6 +149,9 @@ def prepare_fingerprint(account: Account, *, proxy: dict | None = None) -> dict:
     if path.exists():
         manifest = read_json(path)
         verify_manifest(account, manifest, runtime)
+        if manifest.get("schema") == 1 and account.browser.egress != "off":
+            manifest = _migrate(manifest, account)
+            write_json(path, manifest)
         return manifest
     if (account.profile / ".managed").exists():
         raise WorkspaceError("已管理 profile 的 workspace.json 丢失；请从备份恢复")
@@ -150,7 +189,9 @@ def prepare_fingerprint(account: Account, *, proxy: dict | None = None) -> dict:
         "window.outerWidth": width,
         "window.outerHeight": height,
     }
-    if not account.browser.geoip:
+    # egress="off" keeps the old frozen-location behavior; anything else re-derives
+    # the location at launch (see egress.py) and only the random parts stay here.
+    if account.browser.egress == "off":
         if account.browser.timezone or not account.browser.legacy:
             config["timezone"] = account.browser.timezone or "UTC"
     prefs = {
@@ -172,20 +213,16 @@ def prepare_fingerprint(account: Account, *, proxy: dict | None = None) -> dict:
             }
         )
     # launch_options fills config in place: fonts, Canvas, WebGL, locale, seeds, etc.
-    # For GeoIP, use the same authenticated proxy as the browser, then freeze the result.
+    # It is only used to sample the random parts; the location is applied at launch.
     # Only config/prefs are stored; the returned options with proxy/env secrets are discarded.
     launch_options(
         config=config,
         fingerprint=fingerprint,
         window=account.browser.window,
-        locale=(
-            account.browser.locale
-            if account.browser.geoip or account.browser.legacy
-            else account.browser.locale or "en-US"
-        ),
-        geoip=account.browser.geoip,
+        locale=account.browser.locale,
+        geoip=False,
         proxy=proxy,
-        block_webrtc=not account.browser.legacy,
+        block_webrtc=account.browser.webrtc == "block",
         firefox_user_prefs=prefs,
         i_know_what_im_doing=True,
         exclude_addons=[] if account.browser.legacy else list(DefaultAddons),
@@ -194,10 +231,10 @@ def prepare_fingerprint(account: Account, *, proxy: dict | None = None) -> dict:
     )
     effective = {"config": config, "prefs": prefs}
     manifest = {
-        "schema": 1,
+        "schema": 2,
         "account_id": account.id,
         "runtime": runtime,
-        "settings": settings_identity(account),
+        "settings": frozen_settings(account),
         "effective": effective,
         "fingerprint_id": digest(effective),
         "source_sha256": digest(source),
@@ -207,20 +244,37 @@ def prepare_fingerprint(account: Account, *, proxy: dict | None = None) -> dict:
     return manifest
 
 
-def browser_options(account: Account, manifest: dict, *, headless: bool, proxy: dict | None):
+def browser_options(
+    account: Account,
+    manifest: dict,
+    *,
+    headless: bool,
+    proxy: dict | None,
+    effective: dict | None = None,
+    identity=None,
+):
     """Bypass launch_options on restore: it samples random values on EVERY invocation."""
     from camoufox.utils import get_env_vars, get_target_os
 
-    config = manifest["effective"]["config"]
+    from .egress import prefs as egress_prefs
+
+    effective = effective or manifest["effective"]
+    config = effective["config"]
     env = browser_environment(get_env_vars(config, get_target_os(config)))
     # Camoufox's `timezone` config key is silently ignored by the bundled build: JS still
     # reports the host zone. TZ is what the browser process actually honors, so set both.
-    if config.get("timezone"):
-        env["TZ"] = config["timezone"]
+    timezone = identity.timezone if identity is not None else config.get("timezone")
+    if timezone:
+        env["TZ"] = timezone
+    if identity is not None:
+        # Locale formatting and date names read these even when the fingerprint is right.
+        env["LANG"] = env["LC_ALL"] = f"{identity.locale}.UTF-8"
+    prefs = dict(effective["prefs"])
+    prefs.update(egress_prefs(identity, account.browser.webrtc))
     return {
         "executable_path": str(installed_executable()),
         "env": env,
-        "firefox_user_prefs": dict(manifest["effective"]["prefs"]),
+        "firefox_user_prefs": prefs,
         "headless": headless,
         "proxy": proxy,
         "user_data_dir": str(account.profile / "user_data"),

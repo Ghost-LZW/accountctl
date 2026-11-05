@@ -16,8 +16,12 @@ _Avoid_: 一个脚本、一个密码
 _Avoid_: 隐身窗口、临时 context
 
 **固化指纹（Frozen Fingerprint）**：
-首次配置完成后的 Camoufox 生效参数与运行时版本绑定，包含 BrowserForge 原始输入之外的 Canvas、字体种子和 WebGL 参数。
-_Avoid_: 仅 fingerprint.json、每次随机防指纹
+首次配置完成后的 Camoufox 随机参数与运行时版本绑定，包含 BrowserForge 原始输入之外的 Canvas、字体种子和 WebGL 参数；**位置信号（时区、语言、坐标、WebRTC IP）不在其中**。
+_Avoid_: 仅 fingerprint.json、每次随机防指纹、把时区写进指纹
+
+**出口身份（Egress Identity）**：
+代理出口 IP 及其国家、时区、坐标，以及与之匹配的语言。每次启动前重新探测，并回读浏览器实际值；是位置信号唯一的来源。
+_Avoid_: 宿主时区、geoip 首次固化、手工抄写 locale/timezone
 
 **钉定浏览器（Pinned Browser）**：
 固化指纹所绑定的那一个 Camoufox 浏览器构建（`135.0.1-beta.24`），不是"当前受支持的最新版"。上游有更新的构建，而 Camoufox 默认解析成第一个受支持的版本，因此这个钉定是 Frozen Fingerprint 能成立的前提。
@@ -32,7 +36,8 @@ _Avoid_: 最新版浏览器、随 fetch 漂移
 ## Modules
 
 - `config`：账号目录 Module；调用方通过加载、选择和新增 Interface 使用继承与原子写入能力。
-- `fingerprint`：固化指纹 Module；将所有随机选择和版本校验集中，恢复时不重新生成。
+- `fingerprint`：固化指纹 Module；将所有随机选择和版本校验集中，恢复时不重新生成；启动时把 `egress` 提供的身份叠加到配置与环境上。
+- `egress`：出口身份 Module；强制经代理探测、交叉校验、按本地数据库解析位置、校验写死的语言/时区，并在启动后回读真实浏览器值。探测失败或分流不一致时拒绝启动。
 - `lifecycle` / `worker`：会话 Module 的前台 Interface 与后台 Implementation，负责锁、启动确认和协作关闭。
 - `onepassword`：凭据 Module；元数据导入不越过秘密读取 Seam，环境变量和 1Password 是引用解析的两个 Adapter。
 - `cli`：命令到上述 Interface 的映射，不承载浏览器内部逻辑。

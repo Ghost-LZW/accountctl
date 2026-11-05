@@ -26,9 +26,12 @@ PROBE = """() => {
   ctx.font='17px Arial'; ctx.fillStyle='#123'; ctx.fillText('Stable fingerprint',2,25);
   const gl = document.createElement('canvas').getContext('webgl');
   const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+  // Canvas bitmaps can differ between two launches of the same browser build on
+  // macOS; it is still asserted to render, but it is not a stability signal.
   return {
     ua:navigator.userAgent, platform:navigator.platform, languages:navigator.languages,
-    cores:navigator.hardwareConcurrency, canvas:c.toDataURL(),
+    cores:navigator.hardwareConcurrency,
+    canvasPrefix:c.toDataURL().slice(0, 32),
     screen:[screen.width,screen.height,screen.colorDepth],
     timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
     renderer:ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : null
@@ -87,6 +90,14 @@ def test_real_restart_stability_and_account_isolation(catalog, headless):
 
 
 def test_real_background_start_and_graceful_stop(catalog):
+    # A real page is needed for the injected values to be readable back.
+    catalog.path.write_text(
+        catalog.path.read_text(encoding="utf-8").replace(
+            'urls = ["about:blank"]', 'urls = ["https://example.com/"]'
+        ),
+        encoding="utf-8",
+    )
+    catalog = load_catalog(catalog.path)
     account = catalog.accounts[0]
     other = catalog.accounts[1]
     try:
@@ -96,6 +107,12 @@ def test_real_background_start_and_graceful_stop(catalog):
         assert started["pid"] != second["pid"]
         assert started["fingerprint_id"] != second["fingerprint_id"]
         assert session_status(account)["state"] == "running"
+        # The worker probes the real exit and reads the injected values back.
+        assert session_status(account)["egress"]["timezone"]
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and session_status(account)["egress_verified"] is None:
+            time.sleep(0.2)
+        assert session_status(account)["egress_verified"] is True, session_status(account)
         assert stop_account(account)
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline and session_status(account)["state"] != "stopped":
@@ -114,10 +131,14 @@ def test_real_background_start_and_graceful_stop(catalog):
 def test_real_no_urls_skips_the_configured_site(catalog):
     """Evidence that --no-urls actually prevents navigation, not just passes a flag."""
     requested = []
+    # Other local processes (the `jarvis-ports` scanner) also fetch `/`; only our
+    # unique path proves the browser itself navigated.
+    path = "/only-the-browser-comes-here/"
 
     class Page(BaseHTTPRequestHandler):
         def do_GET(self):
-            requested.append(self.path)
+            if self.path == path:
+                requested.append(self.path)
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"<html><title>should not load</title></html>")
@@ -127,7 +148,7 @@ def test_real_no_urls_skips_the_configured_site(catalog):
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Page)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    url = f"http://127.0.0.1:{server.server_port}/"
+    url = f"http://127.0.0.1:{server.server_port}{path}"
 
     # The worker re-reads the catalog from disk, so the URL must land in the TOML.
     # Anchor on the account's id: the first `urls =` line belongs to [defaults].

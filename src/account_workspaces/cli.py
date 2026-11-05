@@ -50,9 +50,20 @@ def parser() -> argparse.ArgumentParser:
     add.add_argument("--proxy-ref")
     add.add_argument("--proxy-from-account", help="复用另一账号的代理来源，不复制密码")
     add.add_argument("--window", help="例如 1280x800")
-    add.add_argument("--geoip", action="store_true", help="首次启动按代理出口 IP 固化地理参数")
-    add.add_argument("--locale", help="与 --geoip 互斥")
-    add.add_argument("--timezone", help="与 --geoip 互斥")
+    add.add_argument("--geoip", action="store_true", help="兼容别名：等同于 --egress auto")
+    add.add_argument(
+        "--egress",
+        choices=("auto", "strict", "warn", "off"),
+        help="auto 每次启动跟随出口；strict 换国家拒绝启动；warn 只记录；off 不探测",
+    )
+    add.add_argument(
+        "--webrtc",
+        choices=("spoof", "block", "keep"),
+        help="spoof 用出口 IP；block 关闭；keep 不改",
+    )
+    add.add_argument("--probe-url", help="出口探测地址；应被代理规则送到与目标站点相同的节点")
+    add.add_argument("--locale", help="固定语言；仍会校验它与出口国家一致")
+    add.add_argument("--timezone", help="固定时区；仍会校验它与出口时区一致")
     for action in ("start", "stop", "status"):
         sub = commands.add_parser(
             action,
@@ -103,6 +114,18 @@ def doctor(catalog) -> int:
     seen = set()
     for account in catalog.accounts:
         path = account.profile / MANIFEST
+        if account.browser.egress != "off":
+            try:
+                from .egress import resolve
+                from .network import account_proxy
+
+                identity = resolve(account, account_proxy(account))
+                print(f"OK {account.id} 出口 {identity.ip} {identity.country} {identity.timezone}")
+                if not account.browser.locale and not account.browser.timezone:
+                    print(f"   {account.id} 将按出口使用 {identity.locale}")
+            except WorkspaceError as error:
+                print(f"FAIL {account.id} 出口: {error}")
+                failures += 1
         try:
             if path.exists() and runtime:
                 manifest = read_json(path)
@@ -158,7 +181,16 @@ def execute(args) -> int:
         }
         browser = {
             name: getattr(args, name)
-            for name in ("proxy", "proxy_ref", "proxy_from_account", "locale", "timezone")
+            for name in (
+                "proxy",
+                "proxy_ref",
+                "proxy_from_account",
+                "egress",
+                "webrtc",
+                "probe_url",
+                "locale",
+                "timezone",
+            )
             if getattr(args, name)
         }
         if args.geoip:
@@ -217,6 +249,15 @@ def execute(args) -> int:
                 else:
                     status = session_status(account)
                     print(f"{account.id}: {status['state']}")
+                    egress_info = status.get("egress")
+                    if egress_info:
+                        mark = "" if status.get("egress_verified") else "（未验证）"
+                        print(
+                            f"  出口 {egress_info['ip']} {egress_info['country']} "
+                            f"{egress_info['timezone']}{mark}"
+                        )
+                    if status.get("egress_error"):
+                        print(f"  {status['egress_error']}")
                     if status.get("error"):
                         print(f"  {status['error']}")
             except WorkspaceError as error:

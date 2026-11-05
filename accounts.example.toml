@@ -8,14 +8,15 @@ urls = ["about:blank"]
 
 [defaults.browser]
 window = [1440, 900]
-locale = "en-US"
-timezone = "UTC"
+# 位置信号默认每次启动前从代理的真实出口重新推导（egress = "auto"）：
+# 时区、语言、地理坐标、WebRTC IP、Accept-Language 全部跟着出口走。
 # proxy = "http://127.0.0.1:7890"    # 无密码代理
 # proxy_ref = "env://BROWSER_PROXY" # 带认证信息的代理只允许引用
-# 可用 geoip=true 在首次启动时按代理 IP 初始化并固化，此时不要设置 locale/timezone。
-# 注意：Clash/mihomo 等分流代理（mode: rule）下 geoip 探测可能走直连，
-# 解析到本地位置而非目标站点实际出口。这时改为显式写死 locale/timezone，
-# 值取自被同一规则覆盖的域名探测结果。详见 README。
+# egress = "auto"                   # auto | strict | warn | off
+# webrtc = "spoof"                  # spoof | block | keep
+# probe_url = "https://ipinfo.io/json"
+# 分流代理（mode: rule）下把 probe_url 指到被同一规则送到目标节点的域名，
+# 否则探测与目标站点可能走不同出口。详见 README。
 
 [[accounts]]
 id = "google-personal"
@@ -38,8 +39,9 @@ urls = ["https://accounts.google.com/"]
 
 [accounts.browser]
 window = [1600, 1000]
-locale = "en-US"
-timezone = "America/New_York"
+# 固定值仍然可以写；启动时会校验它们与出口国家/时区一致，不一致就拒绝启动。
+# locale = "en-US"
+# timezone = "America/New_York"
 
 [accounts.credentials]
 username_ref = "op://Work/google-work/username"

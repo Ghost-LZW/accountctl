@@ -4,9 +4,11 @@ import argparse
 import os
 import signal
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import portalocker
 
+from . import egress
 from .browser_patch import ensure_patched
 from .config import Account, load_catalog
 from .errors import WorkspaceError
@@ -33,21 +35,50 @@ def run_session(
     manifest = prepare_fingerprint(account, proxy=proxy)
     if closing or stop_requested(account, token):
         return
-    options = browser_options(account, manifest, headless=headless, proxy=proxy)
+    # The exit is resolved on every start, before anything is launched. If it cannot be
+    # confirmed the session does not start at all, so the browser never appears somewhere
+    # it cannot prove it came from.
+    if account.browser.egress != "off":
+        identity = egress.resolve(account, proxy)
+        egress.remember(account, identity)
+    else:
+        # No probe: still honor an explicitly pinned locale/timezone, but leave the
+        # frozen fingerprint's geolocation alone.
+        identity = egress.identity_from_config(account)
+    effective = manifest["effective"]
+    if identity is not None:
+        effective = {
+            **effective,
+            "config": egress.apply(effective["config"], identity, account.browser.webrtc),
+        }
+    session = {
+        "state": "running",
+        "pid": os.getpid(),
+        "token": token,
+        "fingerprint_id": manifest["fingerprint_id"],
+    }
+    if identity is not None:
+        session["egress"] = {
+            "ip": identity.ip,
+            "country": identity.country,
+            "timezone": identity.timezone,
+            "locale": identity.locale,
+        }
+    options = browser_options(
+        account, manifest, headless=headless, proxy=proxy, effective=effective, identity=identity
+    )
     restore_legacy_window(account)
     with sync_playwright() as playwright:
         context = playwright.firefox.launch_persistent_context(**options)
         try:
-            write_json(
-                account.profile / "session.json",
-                {
-                    "state": "running",
-                    "pid": os.getpid(),
-                    "token": token,
-                    "fingerprint_id": manifest["fingerprint_id"],
-                },
-            )
+            write_json(account.profile / "session.json", session)
             pages = context.pages
+            verified = False
+            if identity is not None:
+                try:
+                    context.grant_permissions(["geolocation"])
+                except Error:
+                    pass
             # Keep one page so the legacy window sizing below still applies.
             urls = ("about:blank",) if no_urls else account.urls
             for index, url in enumerate(urls):
@@ -65,7 +96,23 @@ def run_session(
                 try:
                     page.goto(url, timeout=20_000, wait_until="domcontentloaded")
                 except Error:
-                    pass
+                    continue
+                if identity is not None and not verified and url != "about:blank":
+                    verified = True
+                    try:
+                        parts = urlsplit(url)
+                        context.grant_permissions(
+                            ["geolocation"], origin=f"{parts.scheme}://{parts.netloc}"
+                        )
+                    except (Error, ValueError):
+                        pass
+                    session.update(egress.verify_page(page, identity))
+                    write_json(account.profile / "session.json", session)
+                    if not session["egress_verified"] and account.browser.egress in {
+                        "auto",
+                        "strict",
+                    }:
+                        raise WorkspaceError("浏览器实际特征与出口不符：" + session["egress_error"])
             while not once and not closing and not stop_requested(account, token):
                 if not context.pages:
                     break

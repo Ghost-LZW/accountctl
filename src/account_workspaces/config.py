@@ -19,12 +19,17 @@ BROWSER_FIELDS = {
     "proxy",
     "proxy_ref",
     "geoip",
+    "egress",
+    "webrtc",
+    "probe_url",
     "locale",
     "timezone",
     "legacy",
     "proxy_from_meta",
     "proxy_from_account",
 }
+EGRESS_POLICIES = ("auto", "strict", "warn", "off")
+WEBRTC_POLICIES = ("spoof", "block", "keep")
 ACCOUNT_FIELDS = {
     "id",
     "label",
@@ -104,6 +109,9 @@ class BrowserSettings:
     proxy: str | None = field(default=None, repr=False)
     proxy_ref: str | None = field(default=None, repr=False)
     geoip: bool = False
+    egress: str = "auto"
+    webrtc: str = "spoof"
+    probe_url: str | None = None
     locale: str | None = None
     timezone: str | None = None
     legacy: bool = False
@@ -171,6 +179,20 @@ def _browser(data: dict) -> BrowserSettings:
     proxy_from_meta = data.get("proxy_from_meta", False)
     if type(legacy) is not bool or type(proxy_from_meta) is not bool:
         raise WorkspaceError("legacy / proxy_from_meta 必须是布尔值")
+    egress = data.get("egress", "auto")
+    if geoip and "egress" not in data:
+        egress = "auto"
+    if type(egress) is not str or egress not in EGRESS_POLICIES:
+        raise WorkspaceError("browser.egress 必须是 auto / strict / warn / off")
+    webrtc = data.get("webrtc", "keep" if legacy else "spoof")
+    if type(webrtc) is not str or webrtc not in WEBRTC_POLICIES:
+        raise WorkspaceError("browser.webrtc 必须是 spoof / block / keep")
+    probe_url = data.get("probe_url")
+    if probe_url is not None:
+        _text(probe_url, "browser.probe_url")
+        from .egress import validate_probe_url
+
+        validate_probe_url(probe_url)
     if proxy_from_meta and not legacy:
         raise WorkspaceError("proxy_from_meta 只用于接入旧 profile")
     proxy, proxy_ref = data.get("proxy"), data.get("proxy_ref")
@@ -200,15 +222,14 @@ def _browser(data: dict) -> BrowserSettings:
             ZoneInfo(timezone)
     except (ZoneInfoNotFoundError, ValueError):
         raise WorkspaceError("timezone 必须是有效的 IANA 时区，例如 Asia/Shanghai") from None
-    if geoip and (locale or timezone):
-        raise WorkspaceError(
-            "geoip=true 时语言与时区从出口 IP 初始化；不能同时指定 locale/timezone"
-        )
     return BrowserSettings(
         tuple(window),
         proxy,
         proxy_ref,
         geoip,
+        egress,
+        webrtc,
+        probe_url,
         locale,
         timezone,
         legacy,
@@ -263,10 +284,10 @@ def parse_catalog(path: Path, raw: dict) -> Catalog:
         overrides = row.get("browser", {})
         _unknown(overrides, BROWSER_FIELDS, "account.browser")
         merged = {**browser_defaults, **overrides}
-        if overrides.get("legacy") or overrides.get("geoip"):
-            for key in ("locale", "timezone"):
-                if key not in overrides:
-                    merged.pop(key, None)
+        # An inherited legacy default without an explicit webrtc choice keeps WebRTC
+        # as the old profile had it rather than enabling spoofing.
+        if "webrtc" not in overrides and "webrtc" not in browser_defaults:
+            merged.pop("webrtc", None)
         if overrides.get("proxy_from_meta"):
             merged.pop("proxy", None)
             merged.pop("proxy_ref", None)
