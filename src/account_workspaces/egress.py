@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import json
 import warnings
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -475,7 +475,3 @@ def verify_page(page, identity: Egress) -> dict:
     if problems:
         return {"egress_verified": False, "egress_error": "；".join(problems)}
     return {"egress_verified": True}
-
-
-def with_locale(identity: Egress, locale: str) -> Egress:
-    return replace(identity, locale=locale)
