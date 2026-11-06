@@ -47,7 +47,9 @@ def test_atomic_add_preserves_comments_and_failed_update(catalog):
         {"id": "../escape"},
         {"id": "X"},
         {"id": "a", "password": "secret"},
-        {"id": "a", "browser": {"engine": "chrome"}},
+        {"id": "a", "browser": {"engine": "unknown"}},
+        {"id": "a", "browser": {"engine": "camoufox", "binary": "/usr/bin/chrome"}},
+        {"id": "a", "browser": {"engine": "chrome", "legacy": True}},
         {"id": "a", "browser": {"egress": "sometimes"}},
         {"id": "a", "browser": {"webrtc": "maybe"}},
         {"id": "a", "browser": {"probe_url": "http://me:secret@ipinfo.io/json"}},
@@ -77,6 +79,18 @@ def test_geoip_is_now_a_compatible_alias(catalog):
         {"version": 1, "accounts": [{"id": "a", "browser": {"geoip": True}}]},
     )
     assert parsed.accounts[0].browser.egress == "auto"
+
+
+def test_engine_defaults_to_camoufox_and_accepts_chrome(catalog):
+    from account_workspaces.config import parse_catalog
+
+    raw = {
+        "version": 1,
+        "accounts": [{"id": "a"}, {"id": "b", "browser": {"engine": "chrome"}}],
+    }
+    parsed = parse_catalog(catalog.path, raw)
+    assert [a.browser.engine for a in parsed.accounts] == ["camoufox", "chrome"]
+    assert parsed.accounts[1].browser.binary is None
 
 
 def test_webrtc_defaults_follow_legacy(catalog):

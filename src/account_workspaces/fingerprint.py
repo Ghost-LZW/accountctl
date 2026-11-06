@@ -140,6 +140,10 @@ def _migrate(manifest: dict, account: Account) -> dict:
 
 def prepare_fingerprint(account: Account, *, proxy: dict | None = None) -> dict:
     """Caller must hold the profile lock for the entire browser lifetime."""
+    if account.browser.engine == "chrome":
+        from . import chrome
+
+        return chrome.prepare(account)
     from browserforge.fingerprints import Fingerprint, FingerprintGenerator, Screen
     from camoufox import DefaultAddons
     from camoufox.utils import launch_options

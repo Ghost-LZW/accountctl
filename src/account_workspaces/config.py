@@ -16,6 +16,8 @@ from .storage import atomic_write, lock
 ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z")
 BROWSER_FIELDS = {
     "window",
+    "engine",
+    "binary",
     "proxy",
     "proxy_ref",
     "geoip",
@@ -28,6 +30,7 @@ BROWSER_FIELDS = {
     "proxy_from_meta",
     "proxy_from_account",
 }
+ENGINES = ("camoufox", "chrome")
 EGRESS_POLICIES = ("auto", "strict", "warn", "off")
 WEBRTC_POLICIES = ("spoof", "block", "keep")
 ACCOUNT_FIELDS = {
@@ -106,6 +109,8 @@ def validate_reference(value: str) -> str:
 @dataclass(frozen=True)
 class BrowserSettings:
     window: tuple[int, int] = (1440, 900)
+    engine: str = "camoufox"
+    binary: str | None = None
     proxy: str | None = field(default=None, repr=False)
     proxy_ref: str | None = field(default=None, repr=False)
     geoip: bool = False
@@ -175,6 +180,16 @@ def _browser(data: dict) -> BrowserSettings:
     geoip = data.get("geoip", False)
     if type(geoip) is not bool:
         raise WorkspaceError("browser.geoip 必须是布尔值")
+    engine = data.get("engine", "camoufox")
+    if type(engine) is not str or engine not in ENGINES:
+        raise WorkspaceError("browser.engine 必须是 camoufox 或 chrome")
+    binary = data.get("binary")
+    if binary is not None:
+        binary = _text(binary, "browser.binary")
+        if engine != "chrome":
+            raise WorkspaceError("browser.binary 只用于 chrome 引擎")
+    if engine == "chrome" and data.get("legacy"):
+        raise WorkspaceError("browser.legacy 只描述旧 Camoufox profile；chrome 请新建账号")
     legacy = data.get("legacy", False)
     proxy_from_meta = data.get("proxy_from_meta", False)
     if type(legacy) is not bool or type(proxy_from_meta) is not bool:
@@ -224,6 +239,8 @@ def _browser(data: dict) -> BrowserSettings:
         raise WorkspaceError("timezone 必须是有效的 IANA 时区，例如 Asia/Shanghai") from None
     return BrowserSettings(
         tuple(window),
+        engine,
+        binary,
         proxy,
         proxy_ref,
         geoip,

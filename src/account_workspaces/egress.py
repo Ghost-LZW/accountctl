@@ -468,9 +468,18 @@ def compare(identity: Egress, observed: dict) -> list[str]:
 
 def verify_page(page, identity: Egress) -> dict:
     """Read the signals back from a live document; blank pages get no injection."""
-    try:
-        observed = page.evaluate(OBSERVE)
-    except Exception as error:  # noqa: BLE001 - a navigation may tear the context down
+    # A start URL that redirects (a signed-in account's /login -> /new) can tear the
+    # execution context down while the read is in flight; that is not a mismatch.
+    error = None
+    for attempt in range(3):
+        try:
+            observed = page.evaluate(OBSERVE)
+            break
+        except Exception as failure:  # noqa: BLE001 - navigation may destroy the context
+            error = failure
+            if attempt < 2:
+                page.wait_for_timeout(1000)
+    else:
         return {"egress_verified": False, "egress_error": f"无法读取浏览器特征：{error}"}
     problems = compare(identity, observed)
     if problems:

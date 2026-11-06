@@ -64,6 +64,12 @@ def parser() -> argparse.ArgumentParser:
     add.add_argument("--probe-url", help="出口探测地址；应被代理规则送到与目标站点相同的节点")
     add.add_argument("--locale", help="固定语言；仍会校验它与出口国家一致")
     add.add_argument("--timezone", help="固定时区；仍会校验它与出口时区一致")
+    add.add_argument(
+        "--engine",
+        choices=("camoufox", "chrome"),
+        help="camoufox 让多个身份彼此不同；chrome 让单个身份最像正常浏览器",
+    )
+    add.add_argument("--binary", help="Chrome 可执行文件路径；默认使用系统安装的 Google Chrome")
     for action in ("start", "stop", "status"):
         sub = commands.add_parser(
             action,
@@ -104,12 +110,23 @@ def parser() -> argparse.ArgumentParser:
 def doctor(catalog) -> int:
     failures = 0
     runtime = None
-    try:
-        runtime = runtime_identity()
-        print(f"OK Camoufox {runtime['camoufox']} / browser {runtime['browser']}")
-    except Exception as error:
-        print(str(error) if isinstance(error, WorkspaceError) else "FAIL Camoufox 运行时不可用")
-        failures += 1
+    chrome = None
+    if any(account.browser.engine == "camoufox" for account in catalog.accounts):
+        try:
+            runtime = runtime_identity()
+            print(f"OK Camoufox {runtime['camoufox']} / browser {runtime['browser']}")
+        except Exception as error:
+            print(str(error) if isinstance(error, WorkspaceError) else "FAIL Camoufox 运行时不可用")
+            failures += 1
+    if any(account.browser.engine == "chrome" for account in catalog.accounts):
+        from . import chrome as engine
+
+        try:
+            chrome = engine.runtime_identity()
+            print(f"OK Chrome {chrome['browser']}")
+        except WorkspaceError as error:
+            print(f"FAIL {error}")
+            failures += 1
     print("OK 1Password CLI 已安装" if shutil.which("op") else "INFO 未安装 op（仅影响凭据集成）")
     seen = set()
     for account in catalog.accounts:
@@ -127,7 +144,16 @@ def doctor(catalog) -> int:
                 print(f"FAIL {account.id} 出口: {error}")
                 failures += 1
         try:
-            if path.exists() and runtime:
+            if account.browser.engine == "chrome":
+                from . import chrome as engine
+
+                own = engine.runtime_identity(account)
+                if path.exists():
+                    engine.verify(account, read_json(path), own)
+                    print(f"OK {account.id} Chrome 身份已固化")
+                else:
+                    print(f"INFO {account.id} 尚未初始化")
+            elif path.exists() and runtime:
                 manifest = read_json(path)
                 verify_manifest(account, manifest, runtime)
                 if manifest["fingerprint_id"] in seen:
@@ -190,6 +216,8 @@ def execute(args) -> int:
                 "probe_url",
                 "locale",
                 "timezone",
+                "engine",
+                "binary",
             )
             if getattr(args, name)
         }

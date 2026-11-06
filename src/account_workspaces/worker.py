@@ -46,7 +46,8 @@ def run_session(
         # frozen fingerprint's geolocation alone.
         identity = egress.identity_from_config(account)
     effective = manifest["effective"]
-    if identity is not None:
+    chrome = account.browser.engine == "chrome"
+    if identity is not None and not chrome:
         effective = {
             **effective,
             "config": egress.apply(effective["config"], identity, account.browser.webrtc),
@@ -64,17 +65,33 @@ def run_session(
             "timezone": identity.timezone,
             "locale": identity.locale,
         }
-    options = browser_options(
-        account, manifest, headless=headless, proxy=proxy, effective=effective, identity=identity
-    )
-    restore_legacy_window(account)
+    if chrome:
+        from . import chrome as engine
+
+        process = engine.spawn(account, identity, proxy=proxy, headless=headless)
+        session["pid"] = process.pid
+    else:
+        process = None
+        options = browser_options(
+            account, manifest, headless=headless, proxy=proxy, effective=effective,
+            identity=identity,
+        )
+        restore_legacy_window(account)
     with sync_playwright() as playwright:
-        context = playwright.firefox.launch_persistent_context(**options)
+        if chrome:
+            browser = engine.connect(playwright, account, process)
+            context = browser.contexts[0]
+            engine.prepare_context(context, identity)
+            if proxy and proxy.get("username"):
+                context.set_http_credentials(proxy)
+        else:
+            browser = None
+            context = playwright.firefox.launch_persistent_context(**options)
         try:
             write_json(account.profile / "session.json", session)
             pages = context.pages
             verified = False
-            if identity is not None:
+            if identity is not None and not chrome:
                 try:
                     context.grant_permissions(["geolocation"])
                 except Error:
@@ -85,6 +102,8 @@ def run_session(
                 if closing or stop_requested(account, token):
                     break
                 page = pages[0] if index == 0 and pages else context.new_page()
+                if chrome:
+                    engine.apply_page(page, identity)
                 if index == 0 and account.browser.legacy:
                     width, height = account.browser.window
                     try:
@@ -115,7 +134,14 @@ def run_session(
                         raise WorkspaceError("浏览器实际特征与出口不符：" + session["egress_error"])
             while not once and not closing and not stop_requested(account, token):
                 if not context.pages:
-                    break
+                    # Chrome quits when its last window closes; keep the session up by
+                    # re-opening a tab instead of treating that as "account stopped".
+                    if not chrome:
+                        break
+                    try:
+                        context.new_page()
+                    except Error:
+                        break
                 try:
                     context.pages[0].wait_for_timeout(300)
                 except Error:
@@ -123,7 +149,19 @@ def run_session(
                     if not context.pages:
                         break
         finally:
-            context.close()
+            if browser is not None:
+                # A CDP-attached context only detaches on close; the browser itself
+                # must be asked to quit, or it would outlive the worker.
+                try:
+                    browser.close()
+                except Error:
+                    pass
+                try:
+                    process.wait(timeout=10)
+                except Exception:  # noqa: BLE001 - a stuck Chrome still gets stopped
+                    process.terminate()
+            else:
+                context.close()
 
 
 def main() -> int:
