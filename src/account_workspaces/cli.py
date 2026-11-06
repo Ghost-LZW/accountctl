@@ -70,6 +70,13 @@ def parser() -> argparse.ArgumentParser:
         help="camoufox 让多个身份彼此不同；chrome 让单个身份最像正常浏览器",
     )
     add.add_argument("--binary", help="Chrome 可执行文件路径；默认使用系统安装的 Google Chrome")
+    add.add_argument(
+        "--gpu",
+        choices=("auto", "metal", "gl", "swiftshader"),
+        help="chrome 的图形后端；同机多账号时让 WebGL 字符串彼此不同",
+    )
+    add.add_argument("--scale", type=float, help="chrome 的 devicePixelRatio，1..3，例如 2")
+    add.add_argument("--canvas-noise", action="store_true", help="chrome 下按账号给 canvas 加稳定噪声")
     for action in ("start", "stop", "status"):
         sub = commands.add_parser(
             action,
@@ -218,11 +225,16 @@ def execute(args) -> int:
                 "timezone",
                 "engine",
                 "binary",
+                "gpu",
             )
             if getattr(args, name)
         }
         if args.geoip:
             browser["geoip"] = True
+        if args.scale:
+            browser["scale"] = args.scale
+        if args.canvas_noise:
+            browser["canvas_noise"] = True
         if args.window:
             browser["window"] = _window(args.window)
         if credentials:

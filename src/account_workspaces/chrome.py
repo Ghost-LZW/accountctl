@@ -159,6 +159,12 @@ def _args(account, identity, *, proxy: dict | None, headless: bool) -> list[str]
         args.append("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
     if proxy:
         args.append(f"--proxy-server={proxy['server']}")
+    # Per-account graphics backend and density: on one Mac every profile would
+    # otherwise report the same GPU and the same devicePixelRatio.
+    if account.browser.gpu != "auto":
+        args.append(f"--use-angle={account.browser.gpu}")
+    if account.browser.scale:
+        args.append(f"--force-device-scale-factor={account.browser.scale:g}")
     return args
 
 
@@ -221,8 +227,82 @@ def prepare_context(context, identity) -> None:
             pass
 
 
-def apply_page(page, identity) -> None:
+def noise_script(account) -> str:
+    """A stable, per-account LSB stamp for canvas readback.
+
+    Canvas noise makes two profiles on one Mac differ; it is derived from the
+    profile path so the same account keeps the same pixels across restarts, and it
+    only ever sets the low bit, so repeated reads stay idempotent instead of drifting.
+    """
+    import hashlib
+
+    digest = hashlib.sha256(str(account.profile).encode()).hexdigest()[:8]
+    return (
+        "(() => {\n"
+        f"  const SEED = 0x{digest};\n"
+        "  // Hashing with the low bit masked out makes stamping idempotent: applying it"
+        " twice\n"
+        "  // picks the same pixel and the same bit, so repeated reads do not drift.\n"
+        "  const hash = (d) => { let x = SEED >>> 0; for (let i = 0; i < d.length; i += 97)"
+        " { x = (x * 33 + (d[i] & 0xFE)) >>> 0; } return x >>> 0; };\n"
+        "  const stamp = (d) => {\n"
+        "    if (!d || d.length < 8) return d;\n"
+        "    let x = hash(d); const n = 1 + (x % 3);\n"
+        "    for (let i = 0; i < n; i++) {\n"
+        "      x = (x * 1664525 + 1013904223) >>> 0;\n"
+        "      const p = (x % (d.length / 4)) * 4 + 1;\n"
+        "      d[p] = (d[p] & 0xFE) | (x & 1);\n"
+        "    }\n"
+        "    return d;\n"
+        "  };\n"
+        "  const C = HTMLCanvasElement.prototype;\n"
+        "  const O = window.OffscreenCanvas && OffscreenCanvas.prototype;\n"
+        "  const patch = (proto, read, write) => {\n"
+        "    if (!proto || !proto[read]) return;\n"
+        "    const orig = proto[read];\n"
+        "    proto[read] = function (...a) {\n"
+        "      const r = orig.apply(this, a);\n"
+        "      try { stamp(r.data); } catch (e) {}\n"
+        "      return r;\n"
+        "    };\n"
+        "    if (write) {\n"
+        "      const flush = proto[write];\n"
+        "      proto[write] = function (d, ...a) { try { stamp(d.data); } catch (e) {}"
+        " return flush.call(this, d, ...a); };\n"
+        "    }\n"
+        "  };\n"
+        "  patch(window.CanvasRenderingContext2D && CanvasRenderingContext2D.prototype,"
+        " 'getImageData', 'putImageData');\n"
+        "  if (O) patch(window.OffscreenCanvasRenderingContext2D &&"
+        " OffscreenCanvasRenderingContext2D.prototype, 'getImageData', 'putImageData');\n"
+        "  const before = (canvas) => {\n"
+        "    const ctx = canvas.getContext && canvas.getContext('2d');\n"
+        "    if (!ctx) return;\n"
+        "    ctx.putImageData(ctx.getImageData(0, 0, canvas.width, canvas.height), 0, 0);\n"
+        "  };\n"
+        "  const stampCanvas = (proto) => {\n"
+        "    for (const name of ['toDataURL', 'toBlob']) {\n"
+        "      if (!proto[name]) continue;\n"
+        "      const orig = proto[name];\n"
+        "      proto[name] = function (...a) {\n"
+        "        try { before(this); } catch (e) {}\n"
+        "        return orig.apply(this, a);\n"
+        "      };\n"
+        "    }\n"
+        "  };\n"
+        "  stampCanvas(C);\n"
+        "  if (O) stampCanvas(O);\n"
+        "})();\n"
+    )
+
+
+def apply_page(page, account, identity) -> None:
     """Per-page emulation keeps a new tab from falling back to the host location."""
+    if account.browser.canvas_noise:
+        try:
+            page.add_init_script(noise_script(account))
+        except Exception:  # noqa: BLE001 - noise is a refinement, not a gate
+            pass
     if identity is None:
         return
     try:

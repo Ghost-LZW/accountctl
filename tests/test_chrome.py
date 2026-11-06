@@ -90,3 +90,30 @@ def test_webrtc_keep_drops_the_policy_flag(account):
     keep = replace(account, browser=replace(account.browser, webrtc="keep"))
     args = chrome._args(keep, None, proxy=None, headless=False)
     assert not any("webrtc-ip-handling" in a for a in args)
+
+
+def test_gpu_and_scale_change_launch_args(account):
+    from dataclasses import replace
+
+    tuned = replace(
+        account,
+        browser=replace(account.browser, gpu="gl", scale=1.5, canvas_noise=True),
+    )
+    args = chrome._args(tuned, None, proxy=None, headless=False)
+    assert "--use-angle=gl" in args
+    assert "--force-device-scale-factor=1.5" in args
+
+
+def test_gpu_auto_adds_no_backend_flag(account):
+    args = chrome._args(account, None, proxy=None, headless=False)
+    assert not any(a.startswith("--use-angle=") for a in args)
+    assert not any(a.startswith("--force-device-scale-factor") for a in args)
+
+
+def test_noise_script_is_stable_per_profile_and_differs_across_profiles(tmp_path, account):
+    from dataclasses import replace
+
+    first = chrome.noise_script(account)
+    assert first == chrome.noise_script(account)
+    other = replace(account, profile=tmp_path / "profiles" / "b")
+    assert chrome.noise_script(other) != first

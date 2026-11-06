@@ -103,7 +103,7 @@ def run_session(
                     break
                 page = pages[0] if index == 0 and pages else context.new_page()
                 if chrome:
-                    engine.apply_page(page, identity)
+                    engine.apply_page(page, account, identity)
                 if index == 0 and account.browser.legacy:
                     width, height = account.browser.window
                     try:

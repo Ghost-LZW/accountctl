@@ -41,6 +41,7 @@ _Avoid_: 最新版浏览器、随 fetch 漂移
 - `lifecycle` / `worker`：会话 Module 的前台 Interface 与后台 Implementation，负责锁、启动确认和协作关闭。
 - `onepassword`：凭据 Module；元数据导入不越过秘密读取 Seam，环境变量和 1Password 是引用解析的两个 Adapter。
 - `cli`：命令到上述 Interface 的映射，不承载浏览器内部逻辑。
+- `chrome`：Chrome 引擎 Module；自己 spawn 浏览器、页面起来后再接 CDP（Playwright 的默认启动参数会让 Cloudflare 挑战死循环），按账号钉 Chrome 大版本，并提供图形后端、devicePixelRatio 与 canvas 噪声三个区分维度。
 - `browser_patch`：钉定浏览器 Module；把版本约束打进 venv 内的 camoufox（只作用于浏览器下载器），让 GeoIP 改走不限流的直链，并在系统回收缓存后从本地副本还原浏览器。由 `cli` 与 `worker` 在每次运行时调用，自动生效。
 
 ## Constraints

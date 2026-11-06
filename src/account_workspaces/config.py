@@ -18,6 +18,9 @@ BROWSER_FIELDS = {
     "window",
     "engine",
     "binary",
+    "gpu",
+    "scale",
+    "canvas_noise",
     "proxy",
     "proxy_ref",
     "geoip",
@@ -31,6 +34,7 @@ BROWSER_FIELDS = {
     "proxy_from_account",
 }
 ENGINES = ("camoufox", "chrome")
+GPUS = ("auto", "metal", "gl", "swiftshader")
 EGRESS_POLICIES = ("auto", "strict", "warn", "off")
 WEBRTC_POLICIES = ("spoof", "block", "keep")
 ACCOUNT_FIELDS = {
@@ -111,6 +115,9 @@ class BrowserSettings:
     window: tuple[int, int] = (1440, 900)
     engine: str = "camoufox"
     binary: str | None = None
+    gpu: str = "auto"
+    scale: float | None = None
+    canvas_noise: bool = False
     proxy: str | None = field(default=None, repr=False)
     proxy_ref: str | None = field(default=None, repr=False)
     geoip: bool = False
@@ -190,6 +197,19 @@ def _browser(data: dict) -> BrowserSettings:
             raise WorkspaceError("browser.binary 只用于 chrome 引擎")
     if engine == "chrome" and data.get("legacy"):
         raise WorkspaceError("browser.legacy 只描述旧 Camoufox profile；chrome 请新建账号")
+    gpu = data.get("gpu", "auto")
+    if type(gpu) is not str or gpu not in GPUS:
+        raise WorkspaceError("browser.gpu 必须是 auto / metal / gl / swiftshader")
+    if gpu != "auto" and engine != "chrome":
+        raise WorkspaceError("browser.gpu 只用于 chrome 引擎")
+    scale = data.get("scale")
+    if scale is not None:
+        if type(scale) not in (int, float) or not 1 <= scale <= 3:
+            raise WorkspaceError("browser.scale 必须是 1..3 之间的数字")
+        scale = float(scale)
+    canvas_noise = data.get("canvas_noise", False)
+    if type(canvas_noise) is not bool:
+        raise WorkspaceError("browser.canvas_noise 必须是布尔值")
     legacy = data.get("legacy", False)
     proxy_from_meta = data.get("proxy_from_meta", False)
     if type(legacy) is not bool or type(proxy_from_meta) is not bool:
@@ -241,6 +261,9 @@ def _browser(data: dict) -> BrowserSettings:
         tuple(window),
         engine,
         binary,
+        gpu,
+        scale,
+        canvas_noise,
         proxy,
         proxy_ref,
         geoip,
