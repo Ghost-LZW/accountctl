@@ -42,6 +42,8 @@ accountctl --config /absolute/path/accounts.toml list
 
 `--no-urls` 只影响本次启动，不修改 `accounts.toml`；想长期不打开网址，把账号的 `urls` 删掉即可继承 `[defaults]`（默认 `about:blank`）。`urls` 不参与指纹校验，改动它不需要重建环境。
 
+`accountctl probe <id>` 用临时 profile 起一次浏览器，输出可比的指纹自检（canvas、WebGL、时区、语言、webdriver、DNT/GPC），不碰登录态；加 `--engine` 可以横向比另一个引擎，加 `--login` 会用 `probe@example.com` 走到验证码页，量 Cloudflare 和 hCaptcha 是不是要人解——不用消耗真实邮箱。
+
 `doctor` 会按账号真实发起一次出口探测（因此会按需读取 `proxy_ref`，但不打印密码），并检查运行时、指纹与重复指纹。
 
 `add` 也可直接指定窗口、GeoIP 与代理来源，不必手工编辑 TOML：

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import sys
 from dataclasses import fields, is_dataclass
 from importlib.metadata import version
 from pathlib import Path
@@ -12,6 +13,10 @@ from .errors import WorkspaceError
 from .storage import atomic_write, private_directory, read_json, write_json
 
 MANIFEST = "workspace.json"
+
+
+def host_os() -> str:
+    return "macos" if sys.platform == "darwin" else ("linux" if sys.platform.startswith("linux") else "windows")
 DYNAMIC_CONFIG = (
     "timezone",
     "locale:language",
@@ -173,6 +178,9 @@ def prepare_fingerprint(account: Account, *, proxy: dict | None = None) -> dict:
         width, height = account.browser.window
         fingerprint = FingerprintGenerator(
             browser="firefox",
+            # The host's fonts and GPU are what the browser can actually render, so a
+            # verified Windows identity on a Mac is a mismatch the OS cannot back up.
+            os=host_os(),
             screen=Screen(
                 min_width=width,
                 max_width=width + 500,
@@ -263,7 +271,24 @@ def browser_options(
     from .egress import prefs as egress_prefs
 
     effective = effective or manifest["effective"]
-    config = effective["config"]
+    config = dict(effective["config"])
+    # BrowserForge marks every identity as DNT + GPC; together they are a much rarer
+    # combination than either alone, and attestation scores notice.
+    config["navigator.doNotTrack"] = "0"
+    config["navigator.extraProperties.globalPrivacyControl"] = False
+    # BrowserForge leaves the menu bar and the Retina density out; on a Mac the
+    # viewport never equals the screen and the ratio is 2, and both are readable.
+    width, height = account.browser.window
+    if config.get("screen.width") == width:
+        # BrowserForge pins the screen to the window; a real display is a bit larger
+        # than the window, and a screen identical to the window is readable.
+        config["screen.width"] = config["screen.availWidth"] = width + 30
+        config["screen.height"] = height + 56
+        config["screen.availHeight"] = height + 23
+    if sys.platform == "darwin":
+        config["screen.devicePixelRatio"] = 2
+    # Synthesized input timings become human-shaped; attestation scores notice.
+    config["humanize"] = True
     env = browser_environment(get_env_vars(config, get_target_os(config)))
     # Camoufox's `timezone` config key is silently ignored by the bundled build: JS still
     # reports the host zone. TZ is what the browser process actually honors, so set both.
@@ -275,7 +300,7 @@ def browser_options(
         env["LANG"] = env["LC_ALL"] = f"{identity.locale}.UTF-8"
     prefs = dict(effective["prefs"])
     prefs.update(egress_prefs(identity, account.browser.webrtc))
-    return {
+    options = {
         "executable_path": str(installed_executable()),
         "env": env,
         "firefox_user_prefs": prefs,
@@ -290,6 +315,10 @@ def browser_options(
         },
         "args": [],
     }
+    if sys.platform == "darwin":
+        # Retina; without this a headless or freshly opened window reports 1.
+        options["device_scale_factor"] = 2
+    return options
 
 
 def restore_legacy_window(account: Account) -> None:

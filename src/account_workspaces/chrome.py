@@ -145,6 +145,9 @@ def _args(account, identity, *, proxy: dict | None, headless: bool) -> list[str]
         # CDP still sets navigator.webdriver without this; Cloudflare notices. Chrome
         # prints an "unsupported flag" banner for it, which is only cosmetic.
         "--disable-blink-features=AutomationControlled",
+        # Without this Chrome shows the "unsupported command-line flag" bar for the
+        # switch above; --test-type is exactly the switch that silences that bar.
+        "--test-type",
         # Chrome then writes the chosen port to user_data/DevToolsActivePort, so the
         # port is discovered instead of reserved.
         "--remote-debugging-port=0",

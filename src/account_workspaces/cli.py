@@ -5,6 +5,7 @@ import json
 import shutil
 import sys
 import tomllib
+from dataclasses import replace
 from pathlib import Path
 
 from . import __version__
@@ -33,6 +34,16 @@ def parser() -> argparse.ArgumentParser:
     commands = result.add_subparsers(dest="command", required=True)
     commands.add_parser("init", help="创建空白本机配置，不覆盖已有文件")
     commands.add_parser("validate", help="校验配置，不访问 1Password 或启动浏览器")
+    probing = commands.add_parser(
+        "probe", help="用临时 profile 起一次浏览器，输出可比的指纹自检；不动配置与登录态"
+    )
+    probing.add_argument("id")
+    probing.add_argument("--engine", choices=("camoufox", "chrome"))
+    probing.add_argument("--proxy", help="临时覆盖代理，例如 http://127.0.0.1:7901")
+    probing.add_argument("--json", action="store_true")
+    probing.add_argument(
+        "--login", action="store_true", help="用假地址走到验证码页，量 Cloudflare 与 hCaptcha 是否挡人"
+    )
     commands.add_parser("doctor", help="检查运行时、指纹和 op 安装情况，不读取密码")
     listing = commands.add_parser("list", help="列出账号及运行状态")
     listing.add_argument("--json", action="store_true")
@@ -196,6 +207,22 @@ def execute(args) -> int:
     catalog = load_catalog(path)
     if args.command == "validate":
         print(f"配置有效，共 {len(catalog.accounts)} 个账号")
+    elif args.command == "probe":
+        from . import egress, probe
+        from .network import account_proxy, parse_proxy
+
+        account = catalog.select([args.id], [], False)[0]
+        if args.engine:
+            account = replace(account, browser=replace(account.browser, engine=args.engine))
+        proxy = parse_proxy(args.proxy) if args.proxy else account_proxy(account)
+        identity = (
+            egress.resolve(account, proxy)
+            if account.browser.egress != "off"
+            else egress.identity_from_config(account)
+        )
+        result = probe.run(account, proxy, identity, login=args.login)
+        print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else probe.render(result))
+        return 1 if result["findings"] else 0
     elif args.command == "doctor":
         return doctor(catalog)
     elif args.command == "add":
@@ -268,8 +295,6 @@ def execute(args) -> int:
     elif args.command in {"start", "stop", "status"}:
         # Disabled accounts can still be inspected/stopped after a config edit.
         if args.command != "start":
-            from dataclasses import replace
-
             catalog = replace(
                 catalog,
                 accounts=tuple(replace(a, enabled=True) for a in catalog.accounts),
