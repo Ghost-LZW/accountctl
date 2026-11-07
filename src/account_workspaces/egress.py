@@ -257,12 +257,30 @@ def _spoken(country: str, locale: str) -> bool:
 
 
 def _primary_locale(country: str) -> str:
+    """The most widely spoken language *in that country*, not CLDR's own pick.
+
+    ``SELECTOR.from_region`` answers es-US for the United States, de-FR for
+    France and bar-DE for Germany: it takes CLDR's ordering, which is neither by
+    population nor by "what a browser there would report".
+    """
     from camoufox.locale import SELECTOR
 
-    try:
-        return SELECTOR.from_region(country).as_string
-    except Exception:  # noqa: BLE001 - unknown territory; English is the least wrong
-        return "en-US"
+    territory = SELECTOR.root.find(f"territory[@type='{country}']")
+    if territory is not None:
+        ranked = sorted(
+            (
+                (
+                    (item.get("type") or "").split("_", 1)[0].lower(),
+                    float(item.get("populationPercent") or 0),
+                )
+                for item in territory.findall("languagePopulation")
+            ),
+            key=lambda pair: pair[1],
+            reverse=True,
+        )
+        if ranked and ranked[0][0]:
+            return f"{ranked[0][0]}-{country}"
+    return "en-US"
 
 
 def _offset(timezone: str) -> int:

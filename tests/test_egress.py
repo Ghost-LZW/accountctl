@@ -211,3 +211,10 @@ def test_probe_url_rejects_credentials(catalog):
     }
     with pytest.raises(WorkspaceError, match="不能包含凭据"):
         parse_catalog(catalog.path, raw)
+
+
+def test_primary_locale_takes_the_most_spoken_language():
+    # from_region() answers es-US for the US and de-FR for France.
+    assert egress._primary_locale("US") == "en-US"
+    assert egress._primary_locale("FR") == "fr-FR"
+    assert egress._primary_locale("DE") == "de-DE"
