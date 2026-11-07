@@ -37,6 +37,8 @@ def _sdk(account):
 
 
 def runtime_identity(account=None) -> dict:
+    """Pin the engine build too: the SDK re-reads its manifest on every start, so a
+    new Chromium could otherwise replace the one an identity was frozen against."""
     from importlib.metadata import version
 
     try:
@@ -45,7 +47,20 @@ def runtime_identity(account=None) -> dict:
         raise WorkspaceError(
             "shard 引擎需要 shardx：pip install 'account-workspaces[shard]' 后重试"
         ) from None
-    return {"engine": "shard", "shardx": version("shardx"), "platform": PLATFORM}
+    chromium = "unknown"
+    if account is not None:
+        try:
+            sdk = _sdk(account)
+            sdk.runtime.install()
+            chromium = sdk.runtime.chromium_version or "unknown"
+        except Exception:  # noqa: BLE001 - offline start still has to work
+            chromium = "unknown"
+    return {
+        "engine": "shard",
+        "shardx": version("shardx"),
+        "chromium": chromium,
+        "platform": PLATFORM,
+    }
 
 
 def _override(profile, identity):
@@ -76,6 +91,11 @@ def prepare(account) -> dict:
     path = account.profile / MANIFEST
     if path.exists():
         manifest = read_json(path)
+        # Profiles frozen before the engine build was part of the runtime: adopt the
+        # build they have actually been running on instead of failing them.
+        if "chromium" not in (manifest.get("runtime") or {}):
+            manifest["runtime"] = runtime
+            write_json(path, manifest)
         verify(account, manifest, runtime)
         return manifest
     if (account.profile / ".managed").exists():
@@ -108,8 +128,12 @@ def verify(account, manifest: dict, runtime: dict) -> None:
         raise WorkspaceError("此 profile 不是 shard 引擎；请新建账号")
     if manifest.get("account_id") != account.id:
         raise WorkspaceError("此 profile 已绑定其他账号；不能复用或复制为另一个账号")
-    if manifest.get("runtime") != runtime:
-        raise WorkspaceError("shardx 或引擎平台已变化；拒绝带着旧身份启动")
+    stored = dict(manifest.get("runtime") or {})
+    current = dict(runtime)
+    if "chromium" not in stored:  # frozen before the engine build was pinned
+        current.pop("chromium", None)
+    if stored != current:
+        raise WorkspaceError("shardx、引擎版本或平台已变化；拒绝带着旧身份启动")
     if manifest.get("settings") != frozen_settings(account):
         raise WorkspaceError("窗口与固化身份不一致；请恢复配置，或创建新的账号环境")
     if not isinstance(manifest.get("effective"), dict):

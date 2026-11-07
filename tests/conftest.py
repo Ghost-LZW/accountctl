@@ -10,7 +10,17 @@ def catalog(tmp_path):
     return add_accounts(
         path,
         [
-            {"id": "alpha", "tags": ["google", "work"], "urls": ["about:blank"]},
-            {"id": "beta", "tags": ["google"], "urls": ["about:blank"]},
+            {
+                "id": "alpha",
+                "tags": ["google", "work"],
+                "urls": ["about:blank"],
+                "browser": {"engine": "camoufox"},
+            },
+            {
+                "id": "beta",
+                "tags": ["google"],
+                "urls": ["about:blank"],
+                "browser": {"engine": "camoufox"},
+            },
         ],
     )

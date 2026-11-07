@@ -85,15 +85,19 @@ def test_geoip_is_now_a_compatible_alias(catalog):
     assert parsed.accounts[0].browser.egress == "auto"
 
 
-def test_engine_defaults_to_camoufox_and_accepts_chrome(catalog):
+def test_engine_defaults_to_shard_and_accepts_the_others(catalog):
     from account_workspaces.config import parse_catalog
 
     raw = {
         "version": 1,
-        "accounts": [{"id": "a"}, {"id": "b", "browser": {"engine": "chrome"}}],
+        "accounts": [
+            {"id": "a"},
+            {"id": "b", "browser": {"engine": "chrome"}},
+            {"id": "c", "browser": {"engine": "camoufox"}},
+        ],
     }
     parsed = parse_catalog(catalog.path, raw)
-    assert [a.browser.engine for a in parsed.accounts] == ["camoufox", "chrome"]
+    assert [a.browser.engine for a in parsed.accounts] == ["shard", "chrome", "camoufox"]
     assert parsed.accounts[1].browser.binary is None
 
 

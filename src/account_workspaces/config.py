@@ -56,6 +56,7 @@ state_dir = ".account-workspaces"
 urls = ["about:blank"]
 
 [defaults.browser]
+engine = "shard"
 window = [1440, 900]
 """
 
@@ -113,7 +114,7 @@ def validate_reference(value: str) -> str:
 @dataclass(frozen=True)
 class BrowserSettings:
     window: tuple[int, int] = (1440, 900)
-    engine: str = "camoufox"
+    engine: str = "shard"
     binary: str | None = None
     gpu: str = "auto"
     scale: float | None = None
@@ -187,7 +188,7 @@ def _browser(data: dict) -> BrowserSettings:
     geoip = data.get("geoip", False)
     if type(geoip) is not bool:
         raise WorkspaceError("browser.geoip 必须是布尔值")
-    engine = data.get("engine", "camoufox")
+    engine = data.get("engine", "shard")
     if type(engine) is not str or engine not in ENGINES:
         raise WorkspaceError("browser.engine 必须是 camoufox / chrome / shard")
     binary = data.get("binary")
