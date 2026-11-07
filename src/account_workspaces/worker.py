@@ -47,7 +47,8 @@ def run_session(
         identity = egress.identity_from_config(account)
     effective = manifest["effective"]
     chrome = account.browser.engine == "chrome"
-    if identity is not None and not chrome:
+    shard = account.browser.engine == "shard"
+    if identity is not None and not (chrome or shard):
         effective = {
             **effective,
             "config": egress.apply(effective["config"], identity, account.browser.webrtc),
@@ -70,6 +71,15 @@ def run_session(
 
         process = engine.spawn(account, identity, proxy=proxy, headless=headless)
         session["pid"] = process.pid
+    elif shard:
+        from . import shard as engine
+
+        process = None
+        launched = engine.launch(
+            account, identity, proxy=proxy, headless=headless, manifest=manifest
+        )
+        if getattr(launched.session, "pid", None):
+            session["pid"] = launched.session.pid
     else:
         process = None
         options = browser_options(
@@ -84,6 +94,9 @@ def run_session(
             engine.prepare_context(context, identity)
             if proxy and proxy.get("username"):
                 context.set_http_credentials(proxy)
+        elif shard:
+            browser = playwright.chromium.connect_over_cdp(launched.cdp_url)
+            context = browser.contexts[0]
         else:
             browser = None
             context = playwright.firefox.launch_persistent_context(**options)
@@ -136,7 +149,7 @@ def run_session(
                 if not context.pages:
                     # Chrome quits when its last window closes; keep the session up by
                     # re-opening a tab instead of treating that as "account stopped".
-                    if not chrome:
+                    if not (chrome or shard):
                         break
                     try:
                         context.new_page()
@@ -149,7 +162,13 @@ def run_session(
                     if not context.pages:
                         break
         finally:
-            if browser is not None:
+            if shard:
+                try:
+                    browser.close()
+                except Error:
+                    pass
+                launched.stop()
+            elif browser is not None:
                 # A CDP-attached context only detaches on close; the browser itself
                 # must be asked to quit, or it would outlive the worker.
                 try:

@@ -5,6 +5,7 @@
 两种引擎按账号选择，取舍是“身份彼此不同”还是“单个身份最像正常人”：
 
 - `camoufox`（默认）：canvas、WebGL、字体、硬件参数逐账号随机固化，还能钉死一个构建版本。账号多、彼此不能相关时用它。
+- `shard`：开源反检测 Chromium（[ShardBrowser](https://github.com/ProxyShard/ShardBrowser)，MIT）。指纹在引擎层改，真机模板（M1–M5/RTX 等）+ 每 profile 独立噪声，**是唯一既能过 claude.ai 登录、又支持一机多账号的引擎**；需要 `pip install 'accountworkspaces[shard]'`。
 - `chrome`：本机真实 Chrome，指纹就是普通 Chrome 的样子，最容易过 hCaptcha / Cloudflare 的自动判定。**同一台机器的 canvas、WebGL、GPU、TLS 是共享的**，账号多了会相关起来；用 `--gpu`、`--scale`、`--canvas-noise` 和不同的窗口尺寸拉开距离，规模再大就该换回 camoufox 或商业指纹浏览器。
 
 ## 快速开始

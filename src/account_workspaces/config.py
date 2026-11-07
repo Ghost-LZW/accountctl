@@ -33,7 +33,7 @@ BROWSER_FIELDS = {
     "proxy_from_meta",
     "proxy_from_account",
 }
-ENGINES = ("camoufox", "chrome")
+ENGINES = ("camoufox", "chrome", "shard")
 GPUS = ("auto", "metal", "gl", "swiftshader")
 EGRESS_POLICIES = ("auto", "strict", "warn", "off")
 WEBRTC_POLICIES = ("spoof", "block", "keep")
@@ -189,7 +189,7 @@ def _browser(data: dict) -> BrowserSettings:
         raise WorkspaceError("browser.geoip 必须是布尔值")
     engine = data.get("engine", "camoufox")
     if type(engine) is not str or engine not in ENGINES:
-        raise WorkspaceError("browser.engine 必须是 camoufox 或 chrome")
+        raise WorkspaceError("browser.engine 必须是 camoufox / chrome / shard")
     binary = data.get("binary")
     if binary is not None:
         binary = _text(binary, "browser.binary")
@@ -210,6 +210,10 @@ def _browser(data: dict) -> BrowserSettings:
     canvas_noise = data.get("canvas_noise", False)
     if type(canvas_noise) is not bool:
         raise WorkspaceError("browser.canvas_noise 必须是布尔值")
+    if canvas_noise and engine != "chrome":
+        raise WorkspaceError("browser.canvas_noise 只用于 chrome 引擎；shard/camoufox 自带噪声")
+    if scale is not None and engine != "chrome":
+        raise WorkspaceError("browser.scale 只用于 chrome 引擎")
     legacy = data.get("legacy", False)
     proxy_from_meta = data.get("proxy_from_meta", False)
     if type(legacy) is not bool or type(proxy_from_meta) is not bool:

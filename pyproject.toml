@@ -22,6 +22,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "ruff==0.16.8", "build>=1,<2"]
+# shard 引擎：开源反检测 Chromium，按需安装
+shard = ["shardx>=2.1,<3"]
 
 [project.scripts]
 accountctl = "account_workspaces.cli:main"

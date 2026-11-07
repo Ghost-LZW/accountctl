@@ -149,6 +149,10 @@ def prepare_fingerprint(account: Account, *, proxy: dict | None = None) -> dict:
         from . import chrome
 
         return chrome.prepare(account)
+    if account.browser.engine == "shard":
+        from . import shard
+
+        return shard.prepare(account)
     from browserforge.fingerprints import Fingerprint, FingerprintGenerator, Screen
     from camoufox import DefaultAddons
     from camoufox.utils import launch_options

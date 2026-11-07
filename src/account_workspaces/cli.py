@@ -38,7 +38,7 @@ def parser() -> argparse.ArgumentParser:
         "probe", help="用临时 profile 起一次浏览器，输出可比的指纹自检；不动配置与登录态"
     )
     probing.add_argument("id")
-    probing.add_argument("--engine", choices=("camoufox", "chrome"))
+    probing.add_argument("--engine", choices=("camoufox", "chrome", "shard"))
     probing.add_argument("--proxy", help="临时覆盖代理，例如 http://127.0.0.1:7901")
     probing.add_argument("--json", action="store_true")
     probing.add_argument(
@@ -77,8 +77,8 @@ def parser() -> argparse.ArgumentParser:
     add.add_argument("--timezone", help="固定时区；仍会校验它与出口时区一致")
     add.add_argument(
         "--engine",
-        choices=("camoufox", "chrome"),
-        help="camoufox 让多个身份彼此不同；chrome 让单个身份最像正常浏览器",
+        choices=("camoufox", "chrome", "shard"),
+        help="camoufox 变化最大但过不了 claude.ai 登录；chrome 最普通；shard 两者兼顾",
     )
     add.add_argument("--binary", help="Chrome 可执行文件路径；默认使用系统安装的 Google Chrome")
     add.add_argument(
@@ -136,6 +136,15 @@ def doctor(catalog) -> int:
         except Exception as error:
             print(str(error) if isinstance(error, WorkspaceError) else "FAIL Camoufox 运行时不可用")
             failures += 1
+    if any(account.browser.engine == "shard" for account in catalog.accounts):
+        from . import shard as shard_engine
+
+        try:
+            shard_engine.runtime_identity()
+            print("OK shardx（Chromium 反检测引擎）")
+        except WorkspaceError as error:
+            print(f"FAIL {error}")
+            failures += 1
     if any(account.browser.engine == "chrome" for account in catalog.accounts):
         from . import chrome as engine
 
@@ -162,7 +171,16 @@ def doctor(catalog) -> int:
                 print(f"FAIL {account.id} 出口: {error}")
                 failures += 1
         try:
-            if account.browser.engine == "chrome":
+            if account.browser.engine == "shard":
+                from . import shard as engine
+
+                own = engine.runtime_identity(account)
+                if path.exists():
+                    engine.verify(account, read_json(path), own)
+                    print(f"OK {account.id} shard 身份已固化")
+                else:
+                    print(f"INFO {account.id} 尚未初始化")
+            elif account.browser.engine == "chrome":
                 from . import chrome as engine
 
                 own = engine.runtime_identity(account)
