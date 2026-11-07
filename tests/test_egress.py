@@ -45,7 +45,6 @@ def located(monkeypatch):
         "_locate",
         lambda ip: ("America/New_York", 25.7617, -80.1918, "US"),
     )
-    monkeypatch.setattr(egress, "_primary_locale", lambda country: "en-US")
 
 
 def account(catalog, **browser):
@@ -124,7 +123,6 @@ def test_stored_locale_survives_same_country(catalog, monkeypatch):
         Egress("198.51.100.7", "US", "America/New_York", 25.7, -80.1, "es-US"),
     )
     fake(monkeypatch, [EXIT, EXIT])
-    monkeypatch.setattr(egress, "_primary_locale", lambda country: "en-US")
     assert resolve(subject, None).locale == "es-US"
 
 
